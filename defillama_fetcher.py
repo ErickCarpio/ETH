@@ -60,8 +60,11 @@ class DefiLlamaFetcher:
             response.raise_for_status()
             data = response.json()
 
+            logger.info(f"📥 Recibidos {len(data)} registros de DefiLlama API")
+
             # Parsear datos
             records = []
+            skipped = 0
             for entry in data:
                 try:
                     # DefiLlama puede retornar timestamp en segundos (int) o string
@@ -90,11 +93,17 @@ class DefiLlamaFetcher:
                         'total_mcap': float(total_mcap)
                     })
                 except Exception as e:
-                    logger.debug(f"Skipping entry due to error: {e}")
+                    skipped += 1
+                    if skipped <= 3:  # Solo mostrar primeros 3 errores
+                        logger.warning(f"⚠️ Skipping entry: {e}")
                     continue
 
+            logger.info(f"📊 Procesados: {len(records)}, Skipped: {skipped}")
+
             if not records:
-                logger.warning("⚠️ No se obtuvieron datos de DefiLlama")
+                logger.warning("⚠️ No se obtuvieron datos de DefiLlama después de parsear")
+                logger.warning(f"   Total de entries recibidas: {len(data)}")
+                logger.warning(f"   Todas fueron filtradas/skipped")
                 return pd.DataFrame()
 
             df = pd.DataFrame(records)
