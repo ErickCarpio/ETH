@@ -14,6 +14,14 @@ import numpy as np
 import sys
 import os
 
+# Importación segura (copia esto arriba)
+try:
+    from data.storage.questdb_connector import QuestDBConnector
+except ImportError:
+    import sys, os
+    sys.path.append(os.getcwd())
+    from data.storage.questdb_connector import QuestDBConnector
+
 # --- PARCHE DE RUTAS ---
 # Esto permite que el archivo encuentre a sus "vecinos" sin importar cómo lo ejecutes
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -167,31 +175,46 @@ class OrderBookManager:
         return (vol_bid - vol_ask) / (vol_bid + vol_ask)
 
 # --- BLOQUE DE PRUEBA ---
+# Reemplaza el bloque if __name__ == "__main__": al final de orderbook_manager.py
+
 if __name__ == "__main__":
     async def test():
-        # 1. Instanciar WS Manager
+        # 1. Infraestructura
         ws = WebSocketManager()
+        db = QuestDBConnector()
+        db.connect()  # <--- Conexión a la BD
         
-        # 2. Instanciar Book Manager
+        # 2. Managers
         book = OrderBookManager("ETHUSDT", ws)
         
-        # 3. Iniciar conexión WS en background
+        # 3. Iniciar
         asyncio.create_task(ws.connect())
-        
-        # 4. Iniciar Book Manager
         await book.start()
         
-        # 5. Monitorizar OBI en tiempo real por 10s
-        for _ in range(10):
-            await asyncio.sleep(1)
+        print("🔴 GRABANDO DATOS DE MERCADO EN QUESTDB...")
+        
+        # 4. Bucle de grabación (100 muestras)
+        for _ in range(100):
+            await asyncio.sleep(0.1) # 10 veces por segundo
             if book.is_ready:
-                snapshot = book.get_l2_snapshot(1)
-                best_bid = snapshot['bids'][0][0]
-                best_ask = snapshot['asks'][0][0]
-                obi = book.get_obi(10)
+                # Obtener métricas
+                snapshot = book.get_l2_snapshot(10)
+                bids = snapshot['bids']
+                asks = snapshot['asks']
                 
-                print(f"⚡ Precio: {best_bid:.2f} / {best_ask:.2f} | 📊 OBI (10): {obi:.4f}")
+                vol_bid = sum(q for p, q in bids)
+                vol_ask = sum(q for p, q in asks)
+                obi = book.get_obi(10)
+                mid_price = (bids[0][0] + asks[0][0]) / 2
+                
+                # GUARDAR EN DB
+                db.insert_obi_metric("ETHUSDT", vol_bid, vol_ask, obi, mid_price)
+                
+                # Feedback visual mínimo
+                print(f"\r💾 Saved: Price {mid_price:.2f} | OBI {obi:.4f}", end="")
                 
         await ws.stop()
+        db.close()
+        print("\n✅ Test finalizado.")
 
     asyncio.run(test())
