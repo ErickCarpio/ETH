@@ -16,9 +16,12 @@ try:
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
     import torch
     FINBERT_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError, Exception) as e:
+    # ImportError: Paquetes no instalados
+    # OSError: PyTorch DLL loading error en Windows
+    # Exception: Cualquier otro error de inicialización
     FINBERT_AVAILABLE = False
-    logging.warning("FinBERT no disponible. Instalar: pip install transformers torch")
+    logging.warning(f"FinBERT no disponible: {type(e).__name__}: {e}")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -2,6 +2,7 @@
 Data Manager - Gestión de Datos con CACHÉ LOCAL
 Guarda datos en disco (/data). Incluye compatibilidad con Orquestador.
 ACTUALIZADO: Ahora descarga On-Chain y Sentiment usando los fetchers
+NOTA: Los fetchers se importan "lazy" para evitar dependencias obligatorias
 """
 import ccxt.async_support as ccxt
 import pandas as pd
@@ -11,9 +12,8 @@ import logging
 from pathlib import Path
 import os
 
-# Import fetchers para on-chain y sentiment
-from onchain_data_fetcher import OnChainDataFetcher
-from sentiment_fetcher import SentimentFetcher
+# Los fetchers se importan solo cuando se necesitan (lazy import)
+# para evitar errores si PyTorch/Transformers no están instalados
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -107,6 +107,9 @@ class DataManager:
                 if onchain_df.empty:
                     logger.info("⚡ Descargando datos On-Chain...")
                     try:
+                        # Lazy import: solo importar cuando realmente se necesita
+                        from onchain_data_fetcher import OnChainDataFetcher
+
                         # Extraer API keys de on-chain
                         onchain_keys = {}
                         if api_keys:
@@ -146,6 +149,9 @@ class DataManager:
                 if sentiment_df.empty:
                     logger.info("🧠 Analizando sentimiento con FinBERT...")
                     try:
+                        # Lazy import: solo importar cuando realmente se necesita
+                        from sentiment_fetcher import SentimentFetcher
+
                         # Extraer API keys de sentiment
                         news_key = None
                         panic_key = None
