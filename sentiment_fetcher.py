@@ -88,9 +88,9 @@ class SentimentFetcher:
             
             df = pd.DataFrame([{
                 'timestamp': pd.to_datetime(p['published_at']),
-                'title': p['title'],
-                'source': p['domain']
-            } for p in all_posts])
+                'title': p.get('title', ''),
+                'source': p.get('domain', p.get('source', {}).get('domain', 'unknown'))
+            } for p in all_posts if p.get('title')])
             
             # Convertir timezone a naive
             if not df.empty and df['timestamp'].dt.tz is not None:
@@ -196,7 +196,7 @@ class SentimentFetcher:
              return pd.DataFrame(columns=['FinBERT_Score'])
 
         df.set_index('timestamp', inplace=True)
-        agg = df.resample('4H').agg({'sentiment_score': 'mean'})
+        agg = df.resample('4h').agg({'sentiment_score': 'mean'})  # Fix: 'H' -> 'h'
         agg.rename(columns={'sentiment_score': 'FinBERT_Score'}, inplace=True)
         agg.fillna(0, inplace=True)
         
