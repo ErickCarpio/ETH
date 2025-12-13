@@ -154,7 +154,9 @@ class TradingSystemOrchestrator:
             crypto_df=dataset['crypto'],
             macro_df=dataset['macro'],
             onchain_df=dataset.get('onchain'),
-            sentiment_df=dataset.get('sentiment')
+            sentiment_df=dataset.get('sentiment'),
+            defillama_df=dataset.get('defillama'),
+            coinglass_df=dataset.get('coinglass')
         )
         
         # Etiquetar régimen

@@ -187,6 +187,75 @@ class DataManager:
 
                 result['sentiment'] = sentiment_df
 
+            # 5. DefiLlama Data (Stablecoins - SIEMPRE GRATIS)
+            if include_onchain:  # Usamos el mismo flag que on-chain
+                defillama_df = self._load_from_cache("defillama")
+
+                if defillama_df.empty:
+                    logger.info("💰 Descargando datos de Stablecoins (DefiLlama)...")
+                    try:
+                        # Lazy import
+                        from defillama_fetcher import DefiLlamaFetcher
+
+                        fetcher = DefiLlamaFetcher()
+
+                        # Ejecutar en thread separado
+                        defillama_df = await asyncio.to_thread(
+                            fetcher.get_stablecoin_features,
+                            days=self.window_days
+                        )
+
+                        # Guardar en caché
+                        if not defillama_df.empty:
+                            self._save_to_cache(defillama_df, "defillama")
+                            logger.info(f"✓ DefiLlama data descargada: {len(defillama_df)} registros")
+                        else:
+                            logger.warning("⚠️ DefiLlama data vacía")
+
+                    except Exception as e:
+                        logger.error(f"❌ Error descargando DefiLlama: {e}")
+                        defillama_df = pd.DataFrame()
+
+                result['defillama'] = defillama_df
+
+            # 6. Coinglass Data (Derivados - Freemium)
+            if include_onchain:  # Usamos el mismo flag
+                coinglass_df = self._load_from_cache("coinglass")
+
+                if coinglass_df.empty:
+                    logger.info("📈 Descargando datos de Derivados (Coinglass)...")
+                    try:
+                        # Lazy import
+                        from coinglass_fetcher import CoinglassFetcher
+
+                        # Extraer API key si existe
+                        coinglass_key = None
+                        if api_keys and 'coinglass' in api_keys:
+                            coinglass_key = api_keys['coinglass']
+
+                        fetcher = CoinglassFetcher(api_key=coinglass_key)
+
+                        # Ejecutar en thread separado
+                        symbol_base = self.symbol.split('/')[0]  # "ETH"
+                        coinglass_df = await asyncio.to_thread(
+                            fetcher.get_derivatives_features,
+                            symbol=symbol_base,
+                            days=self.window_days
+                        )
+
+                        # Guardar en caché
+                        if not coinglass_df.empty:
+                            self._save_to_cache(coinglass_df, "coinglass")
+                            logger.info(f"✓ Coinglass data descargada: {len(coinglass_df)} registros")
+                        else:
+                            logger.warning("⚠️ Coinglass data vacía")
+
+                    except Exception as e:
+                        logger.error(f"❌ Error descargando Coinglass: {e}")
+                        coinglass_df = pd.DataFrame()
+
+                result['coinglass'] = coinglass_df
+
             return result
         finally:
             await self.close_exchange()
