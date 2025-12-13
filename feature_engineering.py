@@ -86,7 +86,12 @@ class FeatureEngineer:
         # Sentiment
         if sentiment_df is not None and 'FinBERT_Score' in sentiment_df.columns:
             df = df.join(sentiment_df[['FinBERT_Score']], how='left')
-        df['FinBERT_Score'] = df['FinBERT_Score'].fillna(0)
+
+        # Ensure FinBERT_Score column exists (create with default value if missing)
+        if 'FinBERT_Score' not in df.columns:
+            df['FinBERT_Score'] = 0.0
+        else:
+            df['FinBERT_Score'] = df['FinBERT_Score'].fillna(0)
         
         df.dropna(inplace=True)
         cols_to_drop = ['open', 'high', 'low', 'close', 'volume']
