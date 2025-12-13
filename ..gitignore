@@ -1,0 +1,22 @@
+# --- Archivos con Claves y Secretos (NUNCA SUBIR) ---
+config.yaml
+.env
+secrets.json
+
+# --- Datos y Modelos Pesados ---
+data/
+models/
+logs/
+*.log
+
+# --- Archivos de Python generados ---
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+
+# --- Entornos Virtuales ---
+venv/
+env/
+.venv/
