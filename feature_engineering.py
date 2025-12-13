@@ -60,29 +60,30 @@ class FeatureEngineer:
         
         return df
 
-    def build_full_features(self, crypto_df, macro_df, onchain_df=None, sentiment_df=None):
+    def build_full_features(self, crypto_df, macro_df, onchain_df=None, sentiment_df=None,
+                           defillama_df=None, coinglass_df=None):
         logger.info("Construyendo features...")
         df = self.create_technical_features(crypto_df)
-        
+
         # On-chain seguro
         if onchain_df is not None and not onchain_df.empty:
             try:
                 # FIX: Usar '4h' minúscula
                 onchain_res = onchain_df.resample('4h').ffill()
                 df = df.join(onchain_res, how='left')
-                
+
                 if 'net_flow' in df.columns:
                     # Z-Score robusto
                     rolling_mean = df['net_flow'].rolling(42).mean()
                     rolling_std = df['net_flow'].rolling(42).std()
                     df['Net_Flow_Z'] = ((df['net_flow'] - rolling_mean) / (rolling_std + 1e-8)).clip(-5,5)
             except: pass
-            
+
         if 'Net_Flow_Z' not in df.columns: df['Net_Flow_Z'] = 0.0
 
         # Macro
         df = self.merge_macro_features(df, macro_df)
-        
+
         # Sentiment
         if sentiment_df is not None and 'FinBERT_Score' in sentiment_df.columns:
             df = df.join(sentiment_df[['FinBERT_Score']], how='left')
@@ -92,9 +93,37 @@ class FeatureEngineer:
             df['FinBERT_Score'] = 0.0
         else:
             df['FinBERT_Score'] = df['FinBERT_Score'].fillna(0)
-        
+
+        # DefiLlama (Stablecoins)
+        if defillama_df is not None and not defillama_df.empty:
+            try:
+                # Resample a 4h
+                defillama_res = defillama_df.resample('4h').ffill()
+                df = df.join(defillama_res, how='left')
+                logger.info(f"✓ DefiLlama features agregadas: {list(defillama_res.columns)}")
+            except Exception as e:
+                logger.warning(f"⚠️ Error agregando DefiLlama features: {e}")
+
+        # Coinglass (Derivados)
+        if coinglass_df is not None and not coinglass_df.empty:
+            try:
+                # Resample a 4h
+                coinglass_res = coinglass_df.resample('4h').ffill()
+                df = df.join(coinglass_res, how='left')
+                logger.info(f"✓ Coinglass features agregadas: {list(coinglass_res.columns)}")
+            except Exception as e:
+                logger.warning(f"⚠️ Error agregando Coinglass features: {e}")
+
+        # Fill NaN para features de DefiLlama/Coinglass si no se agregaron
+        for col in ['stablecoin_mcap', 'stablecoin_flow_7d', 'stablecoin_trend',
+                   'open_interest_norm', 'oi_change', 'funding_rate']:
+            if col not in df.columns:
+                df[col] = 0.0
+            else:
+                df[col] = df[col].fillna(0)
+
         df.dropna(inplace=True)
         cols_to_drop = ['open', 'high', 'low', 'close', 'volume']
         self.feature_names = [c for c in df.columns if c not in cols_to_drop]
-        
+
         return df

@@ -24,3 +24,8 @@ python-dotenv>=1.0.0
 # Optional (para gráficos)
 matplotlib>=3.7.0
 seaborn>=0.12.0
+
+websockets
+aiohttp
+numpy
+pandas
