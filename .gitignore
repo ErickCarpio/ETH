@@ -4,7 +4,7 @@ config.yaml
 secrets.json
 
 # --- Datos y Modelos Pesados ---
-data/
+#data/
 models/
 logs/
 *.log
