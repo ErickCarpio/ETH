@@ -63,17 +63,35 @@ class DefiLlamaFetcher:
             # Parsear datos
             records = []
             for entry in data:
-                # DefiLlama retorna timestamp en segundos
-                ts = datetime.fromtimestamp(entry['date'])
+                try:
+                    # DefiLlama puede retornar timestamp en segundos (int) o string
+                    date_val = entry.get('date', 0)
 
-                # Solo últimos N días
-                if ts < datetime.now() - timedelta(days=days):
+                    if isinstance(date_val, str):
+                        # Si es string, intentar parsear como ISO date
+                        ts = pd.to_datetime(date_val)
+                    else:
+                        # Si es int, asumir timestamp en segundos
+                        ts = datetime.fromtimestamp(date_val)
+
+                    # Solo últimos N días
+                    if ts < datetime.now() - timedelta(days=days):
+                        continue
+
+                    # Obtener market cap total
+                    mcap_data = entry.get('totalCirculatingUSD', {})
+                    if isinstance(mcap_data, dict):
+                        total_mcap = mcap_data.get('peggedUSD', 0)
+                    else:
+                        total_mcap = mcap_data if isinstance(mcap_data, (int, float)) else 0
+
+                    records.append({
+                        'timestamp': ts,
+                        'total_mcap': float(total_mcap)
+                    })
+                except Exception as e:
+                    logger.debug(f"Skipping entry due to error: {e}")
                     continue
-
-                records.append({
-                    'timestamp': ts,
-                    'total_mcap': entry.get('totalCirculatingUSD', {}).get('peggedUSD', 0)
-                })
 
             if not records:
                 logger.warning("⚠️ No se obtuvieron datos de DefiLlama")
