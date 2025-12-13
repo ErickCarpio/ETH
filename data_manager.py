@@ -1,6 +1,7 @@
 """
 Data Manager - Gestión de Datos con CACHÉ LOCAL
 Guarda datos en disco (/data). Incluye compatibilidad con Orquestador.
+ACTUALIZADO: Ahora descarga On-Chain y Sentiment usando los fetchers
 """
 import ccxt.async_support as ccxt
 import pandas as pd
@@ -9,6 +10,10 @@ import asyncio
 import logging
 from pathlib import Path
 import os
+
+# Import fetchers para on-chain y sentiment
+from onchain_data_fetcher import OnChainDataFetcher
+from sentiment_fetcher import SentimentFetcher
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -94,13 +99,88 @@ class DataManager:
                     self._save_to_cache(macro, "macro")
 
             result = {'crypto': crypto, 'macro': macro}
-            
-            # 3. Sentiment & Onchain (Carga simple de caché por ahora)
-            if include_sentiment:
-                result['sentiment'] = self._load_from_cache("sentiment")
+
+            # 3. On-Chain Data (Descarga real si no hay caché)
             if include_onchain:
-                result['onchain'] = self._load_from_cache("onchain")
-                
+                onchain_df = self._load_from_cache("onchain")
+
+                if onchain_df.empty:
+                    logger.info("⚡ Descargando datos On-Chain...")
+                    try:
+                        # Extraer API keys de on-chain
+                        onchain_keys = {}
+                        if api_keys:
+                            if 'cryptoquant' in api_keys:
+                                onchain_keys['cryptoquant'] = api_keys['cryptoquant']
+                            if 'glassnode' in api_keys:
+                                onchain_keys['glassnode'] = api_keys['glassnode']
+
+                        # Instanciar fetcher
+                        fetcher = OnChainDataFetcher(api_keys=onchain_keys if onchain_keys else None)
+
+                        # Ejecutar en thread separado (fetcher es síncrono)
+                        symbol_base = self.symbol.split('/')[0]  # "ETH" de "ETH/USDT"
+                        onchain_df = await asyncio.to_thread(
+                            fetcher.get_composite_onchain_signal,
+                            symbol=symbol_base,
+                            days=self.window_days
+                        )
+
+                        # Guardar en caché
+                        if not onchain_df.empty:
+                            self._save_to_cache(onchain_df, "onchain")
+                            logger.info(f"✓ On-Chain data descargada: {len(onchain_df)} registros")
+                        else:
+                            logger.warning("⚠️ On-Chain data vacía")
+
+                    except Exception as e:
+                        logger.error(f"❌ Error descargando on-chain: {e}")
+                        onchain_df = pd.DataFrame()
+
+                result['onchain'] = onchain_df
+
+            # 4. Sentiment Data (Descarga real si no hay caché)
+            if include_sentiment:
+                sentiment_df = self._load_from_cache("sentiment")
+
+                if sentiment_df.empty:
+                    logger.info("🧠 Analizando sentimiento con FinBERT...")
+                    try:
+                        # Extraer API keys de sentiment
+                        news_key = None
+                        panic_key = None
+
+                        if api_keys:
+                            if 'newsapi' in api_keys:
+                                news_key = api_keys['newsapi']
+                            if 'cryptopanic' in api_keys:
+                                panic_key = api_keys['cryptopanic']
+
+                        # Instanciar fetcher
+                        fetcher = SentimentFetcher(
+                            news_api_key=news_key,
+                            cryptopanic_key=panic_key
+                        )
+
+                        # Ejecutar análisis (puede tardar 5-10 min en primera ejecución)
+                        sentiment_df = await asyncio.to_thread(
+                            fetcher.get_sentiment_dataset,
+                            days=28  # Limitado por NewsAPI gratuita
+                        )
+
+                        # Guardar en caché
+                        if not sentiment_df.empty:
+                            self._save_to_cache(sentiment_df, "sentiment")
+                            logger.info(f"✓ Sentiment data procesada: {len(sentiment_df)} registros")
+                        else:
+                            logger.warning("⚠️ Sentiment data vacía")
+
+                    except Exception as e:
+                        logger.error(f"❌ Error procesando sentiment: {e}")
+                        sentiment_df = pd.DataFrame()
+
+                result['sentiment'] = sentiment_df
+
             return result
         finally:
             await self.close_exchange()

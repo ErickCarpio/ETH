@@ -139,6 +139,8 @@ class TradingSystemOrchestrator:
                 api_keys['glassnode'] = apis['glassnode'].get('api_key')
             if apis.get('newsapi', {}).get('enabled'):
                 api_keys['newsapi'] = apis['newsapi'].get('api_key')
+            if apis.get('cryptopanic', {}).get('enabled'):
+                api_keys['cryptopanic'] = apis['cryptopanic'].get('api_key')
         
         dataset = await self.data_manager.get_full_dataset(
             include_onchain=self.config.get('data', {}).get('include_onchain', False),
