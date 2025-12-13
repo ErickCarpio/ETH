@@ -70,12 +70,12 @@ class DefiLlamaFetcher:
                     # DefiLlama puede retornar timestamp en segundos (int) o string
                     date_val = entry.get('date', 0)
 
+                    # Usar pd.to_datetime que es más robusto en Windows
                     if isinstance(date_val, str):
-                        # Si es string, intentar parsear como ISO date
                         ts = pd.to_datetime(date_val)
                     else:
-                        # Si es int, asumir timestamp en segundos
-                        ts = datetime.fromtimestamp(date_val)
+                        # Timestamp en segundos -> usar pd.to_datetime con unit='s'
+                        ts = pd.to_datetime(date_val, unit='s')
 
                     # Solo últimos N días
                     if ts < datetime.now() - timedelta(days=days):
