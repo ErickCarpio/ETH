@@ -98,7 +98,7 @@ class MicrostructureManager:
                 
             try:
                 # 1. Obtener datos crudos
-                snapshot = self.book_manager.get_l2_snapshot(depth=20)
+                snapshot = self.book_manager.get_l2_snapshot(limit=20)
                 current_vpin = self.vpin_calc.get_current_vpin()
                 mid_price = (snapshot['bids'][0][0] + snapshot['asks'][0][0]) / 2
                 
