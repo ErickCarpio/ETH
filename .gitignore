@@ -4,7 +4,11 @@ config.yaml
 secrets.json
 
 # --- Datos y Modelos Pesados ---
-data/
+# Ignorar archivos de datos pero NO el código Python
+data/*
+!data/__init__.py
+!data/managers/
+!data/storage/
 models/
 logs/
 *.log
