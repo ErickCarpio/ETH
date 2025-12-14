@@ -311,18 +311,18 @@ class QuestDBStorage:
         if table == "orderbook_snapshots":
             sql = """
             INSERT INTO orderbook_snapshots VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             """
         elif table == "microstructure_features":
             sql = """
             INSERT INTO microstructure_features VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             """
         elif table == "trades":
             sql = """
-            INSERT INTO trades VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO trades VALUES (%s, %s, %s, %s, %s, %s, %s)
             """
         else:
             logger.error(f"❌ Tabla desconocida: {table}")
@@ -386,7 +386,7 @@ class QuestDBStorage:
         """
         sql = """
         SELECT * FROM orderbook_snapshots
-        WHERE symbol = $1
+        WHERE symbol = %s
         ORDER BY timestamp DESC
         LIMIT 1
         """
@@ -405,9 +405,9 @@ class QuestDBStorage:
         """
         sql = """
         SELECT * FROM orderbook_snapshots
-        WHERE symbol = $1
-          AND timestamp >= $2
-          AND timestamp < $3
+        WHERE symbol = %s
+          AND timestamp >= %s
+          AND timestamp < %s
         ORDER BY timestamp ASC
         """
 
@@ -431,9 +431,9 @@ class QuestDBStorage:
             avg(trade_flow_toxicity) as avg_toxicity,
             avg(effective_spread) as avg_eff_spread
         FROM microstructure_features
-        WHERE symbol = $1
-          AND timestamp >= $2
-          AND timestamp < $3
+        WHERE symbol = %s
+          AND timestamp >= %s
+          AND timestamp < %s
         """
 
         results = self.query(sql, (symbol, start_time, end_time))
