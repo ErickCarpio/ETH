@@ -312,29 +312,32 @@ async def generate_training_data():
     Genera datos para entrenar el modelo
 
     Opciones:
-    1. Rápido: 1 hora, snapshot cada 5 min = 12 puntos
-    2. Normal: 6 horas, snapshot cada 5 min = 72 puntos
-    3. Completo: 24 horas, snapshot cada 5 min = 288 puntos
+    1. Rápido: 12 snapshots cada 5 segundos = 12 puntos
+    2. Normal: 72 snapshots cada 5 segundos = 72 puntos
+    3. Completo: 288 snapshots cada 5 segundos = 288 puntos
     """
     print("🎯 GENERAR DATOS HISTÓRICOS PARA ENTRENAMIENTO\n")
     print("Opciones:")
-    print("1. Rápido    - 1 hora  (12 snapshots)   - ~1 minuto")
-    print("2. Normal    - 6 horas (72 snapshots)   - ~6 minutos")
-    print("3. Completo  - 24 horas (288 snapshots) - ~24 minutos")
-    print("4. Extenso   - 7 días (2016 snapshots)  - ~3 horas")
+    print("1. Rápido    - 12 snapshots   - ~1 minuto")
+    print("2. Normal    - 72 snapshots   - ~6 minutos")
+    print("3. Completo  - 288 snapshots  - ~24 minutos")
+    print("4. Extenso   - 2016 snapshots - ~3 horas")
 
     choice = input("\nElige opción (1-4): ").strip()
 
-    hours_map = {'1': 1, '2': 6, '3': 24, '4': 168}
-    hours = hours_map.get(choice, 6)
+    snapshots_map = {'1': 12, '2': 72, '3': 288, '4': 2016}
+    num_snapshots = snapshots_map.get(choice, 72)
 
-    print(f"\n🔄 Generando datos de {hours} horas...")
+    # Calcular hours basado en snapshots (5 min entre cada uno para simular timeline)
+    hours = (num_snapshots * 5) / 60.0
+
+    print(f"\n🔄 Generando {num_snapshots} snapshots (simulando {hours:.1f} horas)...")
     print("⚠️  Esto va a tardar. Puedes presionar Ctrl+C para detener en cualquier momento.\n")
 
     generator = HistoricalMicrostructureGenerator("ETH/USDT")
     df = await generator.generate_and_save(
         hours=hours,
-        interval_seconds=300  # 5 minutos
+        interval_seconds=5  # Solo 5 segundos para rate limiting
     )
 
     if df is not None:
