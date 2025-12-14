@@ -610,6 +610,174 @@ class FeatureEngineer:
             else:
                 df[col] = df[col].fillna(0)
 
+        # ===== PHASE 5: FEATURE INTERACTIONS =====
+        # Polynomial features (degree 2) y ratios inteligentes entre features clave
+
+        # 1. MOMENTUM × VOLATILITY INTERACTIONS
+        if 'returns' in df.columns and 'volatility_24h' in df.columns:
+            df['momentum_vol_interaction'] = df['returns'] * df['volatility_24h']
+            df['returns_volatility_ratio'] = df['returns'] / (df['volatility_24h'] + 1e-8)
+
+        if 'RSI_14' in df.columns and 'volatility_24h' in df.columns:
+            df['rsi_vol_interaction'] = (df['RSI_14'] - 50) * df['volatility_24h']
+
+        # 2. MICROSTRUCTURE × PRICE INTERACTIONS
+        if 'obi_5_mean' in df.columns and 'returns' in df.columns:
+            df['obi_returns_sync'] = df['obi_5_mean'] * df['returns']
+            df['obi_returns_divergence'] = abs(df['obi_5_mean'] - df['returns'])
+
+        if 'vpin_mean' in df.columns and 'volatility_24h' in df.columns:
+            df['vpin_vol_stress'] = df['vpin_mean'] * df['volatility_24h']
+
+        if 'spread_bps_mean' in df.columns and 'volume' in df.columns:
+            df['spread_volume_impact'] = df['spread_bps_mean'] * np.log1p(df['volume'])
+
+        # 3. DERIVATIVES × PRICE INTERACTIONS
+        if 'funding_rate_last' in df.columns and 'returns' in df.columns:
+            df['funding_returns_carry'] = df['funding_rate_last'] * df['returns']
+            df['funding_returns_divergence'] = abs(df['funding_rate_last']) - abs(df['returns'])
+
+        if 'liq_imbalance_mean' in df.columns and 'returns' in df.columns:
+            df['liq_price_confirmation'] = df['liq_imbalance_mean'] * df['returns']
+
+        if 'oi_change_rate' in df.columns and 'volume' in df.columns:
+            df['oi_volume_buildup'] = df['oi_change_rate'] * np.log1p(df['volume'])
+
+        # 4. RATIOS IMPORTANTES
+        # Volume-based ratios
+        if 'volume' in df.columns:
+            df['volume_ma_6h'] = df['volume'].rolling(6).mean()
+            df['volume_ma_72h'] = df['volume'].rolling(72).mean()
+
+            if 'volume_ma_6h' in df.columns and 'volume_ma_72h' in df.columns:
+                df['volume_trend_ratio'] = df['volume_ma_6h'] / (df['volume_ma_72h'] + 1e-8)
+
+        # Volatility ratios
+        if 'volatility_6h' in df.columns and 'volatility_72h' in df.columns:
+            df['volatility_expansion'] = df['volatility_6h'] / (df['volatility_72h'] + 1e-8)
+
+        # Microstructure ratios
+        if 'obi_5_mean' in df.columns and 'obi_20_mean' in df.columns:
+            df['obi_depth_ratio'] = df['obi_5_mean'] / (abs(df['obi_20_mean']) + 1e-8)
+
+        if 'spread_bps_mean' in df.columns and 'volatility_24h' in df.columns:
+            df['spread_vol_ratio'] = df['spread_bps_mean'] / (df['volatility_24h'] * 10000 + 1e-8)
+
+        # Derivatives ratios
+        if 'liq_long_pct_mean' in df.columns and 'liq_short_pct_mean' in df.columns:
+            df['liq_long_short_ratio'] = df['liq_long_pct_mean'] / (df['liq_short_pct_mean'] + 1e-8)
+
+        # 5. CONDITIONAL FEATURES (If-Then Logic)
+        # High volatility + high VPIN = extreme risk
+        if 'volatility_24h' in df.columns and 'vpin_mean' in df.columns:
+            vol_high = df['volatility_24h'] > df['volatility_24h'].quantile(0.75)
+            vpin_high = df['vpin_mean'] > 0.5
+            df['extreme_risk_regime'] = (vol_high & vpin_high).astype(int)
+
+        # Low liquidity (wide spread) + high volume = manipulation signal
+        if 'spread_bps_mean' in df.columns and 'volume' in df.columns:
+            spread_wide = df['spread_bps_mean'] > df['spread_bps_mean'].quantile(0.75)
+            volume_high = df['volume'] > df['volume'].quantile(0.75)
+            df['manipulation_signal'] = (spread_wide & volume_high).astype(int)
+
+        # High funding + increasing OI = overleveraged longs
+        if 'funding_rate_last' in df.columns and 'oi_change_rate' in df.columns:
+            funding_high = df['funding_rate_last'] > df['funding_rate_last'].quantile(0.75)
+            oi_increasing = df['oi_change_rate'] > 0
+            df['overleveraged_longs'] = (funding_high & oi_increasing).astype(int)
+
+        # Liquidation cascade + price drop = capitulation
+        if 'liq_cascade_risk' in df.columns and 'returns' in df.columns:
+            cascade_risk = df['liq_cascade_risk'] == 1
+            price_drop = df['returns'] < -0.02
+            df['capitulation_signal'] = (cascade_risk & price_drop).astype(int)
+
+        # OBI divergence + price near resistance = rejection
+        if 'obi_5_mean' in df.columns and 'dist_to_resistance' in df.columns:
+            obi_negative = df['obi_5_mean'] < -0.1
+            near_resistance = df['dist_to_resistance'] < 0.02
+            df['resistance_rejection'] = (obi_negative & near_resistance).astype(int)
+
+        # 6. POLYNOMIAL FEATURES (Selected Key Features)
+        # Square of important features
+        if 'returns' in df.columns:
+            df['returns_squared_interaction'] = df['returns'] ** 2
+
+        if 'obi_5_mean' in df.columns:
+            df['obi_squared'] = df['obi_5_mean'] ** 2
+
+        if 'funding_rate_last' in df.columns:
+            df['funding_squared'] = df['funding_rate_last'] ** 2
+
+        # 7. CROSS-FEATURE PRODUCTS (Most Predictive Combinations)
+        if 'RSI_14' in df.columns and 'volume_momentum' in df.columns:
+            df['rsi_volume_momentum'] = (df['RSI_14'] - 50) * df['volume_momentum']
+
+        if 'returns_skew_24h' in df.columns and 'returns_kurt_24h' in df.columns:
+            df['distribution_risk'] = df['returns_skew_24h'] * df['returns_kurt_24h']
+
+        if 'support_strength' in df.columns and 'dist_to_support' in df.columns:
+            df['support_conviction'] = df['support_strength'] * (1 / (df['dist_to_support'] + 0.01))
+
+        # 8. REGIME-BASED FEATURES
+        # Define regime based on volatility and trend
+        if 'volatility_24h' in df.columns and 'returns' in df.columns:
+            vol_median = df['volatility_24h'].median()
+            returns_median = df['returns'].median()
+
+            # 4 regimes: low_vol_up, low_vol_down, high_vol_up, high_vol_down
+            low_vol = df['volatility_24h'] < vol_median
+            high_vol = df['volatility_24h'] >= vol_median
+            up_trend = df['returns'] > returns_median
+            down_trend = df['returns'] <= returns_median
+
+            df['regime_low_vol_up'] = (low_vol & up_trend).astype(int)
+            df['regime_low_vol_down'] = (low_vol & down_trend).astype(int)
+            df['regime_high_vol_up'] = (high_vol & up_trend).astype(int)
+            df['regime_high_vol_down'] = (high_vol & down_trend).astype(int)
+
+        # 9. COMPOSITE INDICATORS
+        # Combined momentum score
+        if 'returns' in df.columns and 'RSI_14' in df.columns and 'volume_momentum' in df.columns:
+            df['momentum_composite'] = (
+                df['returns'].rolling(6).mean() * 0.4 +
+                (df['RSI_14'] - 50) / 50 * 0.3 +
+                df['volume_momentum'] * 0.3
+            )
+
+        # Combined liquidity stress
+        if 'spread_bps_mean' in df.columns and 'vpin_mean' in df.columns and 'liq_count_5m_sum' in df.columns:
+            spread_norm = (df['spread_bps_mean'] - df['spread_bps_mean'].mean()) / (df['spread_bps_mean'].std() + 1e-8)
+            vpin_norm = (df['vpin_mean'] - df['vpin_mean'].mean()) / (df['vpin_mean'].std() + 1e-8)
+            liq_norm = (df['liq_count_5m_sum'] - df['liq_count_5m_sum'].mean()) / (df['liq_count_5m_sum'].std() + 1e-8)
+
+            df['liquidity_stress_composite'] = (spread_norm + vpin_norm + liq_norm) / 3
+
+        # Combined leverage risk
+        if 'funding_rate_last' in df.columns and 'oi_change_rate' in df.columns and 'liq_count_5m_sum' in df.columns:
+            funding_norm = (df['funding_rate_last'] - df['funding_rate_last'].mean()) / (df['funding_rate_last'].std() + 1e-8)
+            oi_norm = (df['oi_change_rate'] - df['oi_change_rate'].mean()) / (df['oi_change_rate'].std() + 1e-8)
+            liq_norm2 = (df['liq_count_5m_sum'] - df['liq_count_5m_sum'].mean()) / (df['liq_count_5m_sum'].std() + 1e-8)
+
+            df['leverage_risk_composite'] = (funding_norm + oi_norm + liq_norm2) / 3
+
+        # Fill NaN for Phase 5 features
+        phase5_cols = [
+            'momentum_vol_interaction', 'returns_volatility_ratio', 'rsi_vol_interaction',
+            'obi_returns_sync', 'obi_returns_divergence', 'vpin_vol_stress', 'spread_volume_impact',
+            'funding_returns_carry', 'funding_returns_divergence', 'liq_price_confirmation', 'oi_volume_buildup',
+            'volume_ma_6h', 'volume_ma_72h', 'volume_trend_ratio', 'volatility_expansion',
+            'obi_depth_ratio', 'spread_vol_ratio', 'liq_long_short_ratio',
+            'extreme_risk_regime', 'manipulation_signal', 'overleveraged_longs', 'capitulation_signal', 'resistance_rejection',
+            'returns_squared_interaction', 'obi_squared', 'funding_squared',
+            'rsi_volume_momentum', 'distribution_risk', 'support_conviction',
+            'regime_low_vol_up', 'regime_low_vol_down', 'regime_high_vol_up', 'regime_high_vol_down',
+            'momentum_composite', 'liquidity_stress_composite', 'leverage_risk_composite'
+        ]
+        for col in phase5_cols:
+            if col in df.columns:
+                df[col] = df[col].fillna(0)
+
         df.dropna(inplace=True)
         cols_to_drop = ['open', 'high', 'low', 'close', 'volume']
         self.feature_names = [c for c in df.columns if c not in cols_to_drop]
