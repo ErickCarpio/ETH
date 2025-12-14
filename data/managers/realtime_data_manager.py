@@ -25,8 +25,16 @@ import time
 from data.managers.websocket_manager import DepthStreamManager, TradeStreamManager
 from data.managers.orderbook_reconstructor import OrderBookReconstructor
 from data.managers.rate_limiter import MultiSourceRateLimiter, create_binance_limiter
-from data.storage.questdb_storage import QuestDBStorage
 from microstructure.features import MicrostructureFeatures
+
+# Import opcional de QuestDB
+try:
+    from data.storage.questdb_storage import QuestDBStorage
+    QUESTDB_AVAILABLE = True
+except ImportError:
+    QUESTDB_AVAILABLE = False
+    logging.warning("QuestDB storage no disponible (falta psycopg2)")
+    QuestDBStorage = None
 
 logger = logging.getLogger(__name__)
 
@@ -70,13 +78,17 @@ class RealtimeDataManager:
         # Storage (opcional)
         self.storage: Optional[QuestDBStorage] = None
         if enable_storage:
-            try:
-                self.storage = QuestDBStorage(host=questdb_host, port=questdb_port)
-                self.storage.initialize_tables()
-                logger.info("✅ QuestDB storage habilitado")
-            except Exception as e:
-                logger.warning(f"⚠️  No se pudo conectar a QuestDB: {e}")
+            if not QUESTDB_AVAILABLE:
+                logger.warning("⚠️  QuestDB no disponible - instala: pip install psycopg2-binary")
                 self.enable_storage = False
+            else:
+                try:
+                    self.storage = QuestDBStorage(host=questdb_host, port=questdb_port)
+                    self.storage.initialize_tables()
+                    logger.info("✅ QuestDB storage habilitado")
+                except Exception as e:
+                    logger.warning(f"⚠️  No se pudo conectar a QuestDB: {e}")
+                    self.enable_storage = False
 
         # Control de ejecución
         self.is_running = False

@@ -256,6 +256,61 @@ class DataManager:
 
                 result['coinglass'] = coinglass_df
 
+            # 7. Microstructure Features (Fase 1 - QuestDB)
+            # Solo se incluyen si hay datos en QuestDB (no fallback a caché)
+            try:
+                from data.storage.unified_storage import UnifiedQuestDBStorage
+
+                storage = UnifiedQuestDBStorage()
+
+                if storage.is_available:
+                    logger.info("📊 Cargando features microestructurales desde QuestDB...")
+
+                    # Query últimos N días de features
+                    end_time = datetime.now()
+                    start_time = end_time - timedelta(days=self.window_days)
+
+                    sql = """
+                    SELECT
+                        timestamp,
+                        obi_5,
+                        obi_10,
+                        obi_20,
+                        vpin,
+                        ofi,
+                        spread,
+                        spread_bps,
+                        micro_price,
+                        kyle_lambda,
+                        roll_spread
+                    FROM microstructure_features
+                    WHERE symbol = $1
+                      AND timestamp >= $2
+                      AND timestamp < $3
+                    ORDER BY timestamp ASC
+                    """
+
+                    symbol_base = self.symbol.replace('/', '')  # "ETHUSDT"
+                    micro_results = storage.query(sql, (symbol_base, start_time, end_time))
+
+                    if micro_results:
+                        microstructure_df = pd.DataFrame(micro_results)
+                        microstructure_df['timestamp'] = pd.to_datetime(microstructure_df['timestamp'])
+                        microstructure_df.set_index('timestamp', inplace=True)
+
+                        result['microstructure'] = microstructure_df
+                        logger.info(f"✓ Microstructure data cargada: {len(microstructure_df)} registros")
+                    else:
+                        logger.warning("⚠️ No hay microstructure data en QuestDB")
+                        result['microstructure'] = pd.DataFrame()
+                else:
+                    logger.warning("⚠️ QuestDB no disponible - sin microstructure features")
+                    result['microstructure'] = pd.DataFrame()
+
+            except Exception as e:
+                logger.warning(f"⚠️ Error cargando microstructure features: {e}")
+                result['microstructure'] = pd.DataFrame()
+
             return result
         finally:
             await self.close_exchange()

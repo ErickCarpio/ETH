@@ -156,7 +156,8 @@ class TradingSystemOrchestrator:
             onchain_df=dataset.get('onchain'),
             sentiment_df=dataset.get('sentiment'),
             defillama_df=dataset.get('defillama'),
-            coinglass_df=dataset.get('coinglass')
+            coinglass_df=dataset.get('coinglass'),
+            microstructure_df=dataset.get('microstructure')
         )
         
         # Etiquetar régimen

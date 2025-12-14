@@ -61,7 +61,7 @@ class FeatureEngineer:
         return df
 
     def build_full_features(self, crypto_df, macro_df, onchain_df=None, sentiment_df=None,
-                           defillama_df=None, coinglass_df=None):
+                           defillama_df=None, coinglass_df=None, microstructure_df=None):
         logger.info("Construyendo features...")
         df = self.create_technical_features(crypto_df)
 
@@ -117,6 +117,70 @@ class FeatureEngineer:
         # Fill NaN para features de DefiLlama/Coinglass si no se agregaron
         for col in ['stablecoin_mcap', 'stablecoin_flow_7d', 'stablecoin_trend',
                    'open_interest_norm', 'oi_change', 'funding_rate']:
+            if col not in df.columns:
+                df[col] = 0.0
+            else:
+                df[col] = df[col].fillna(0)
+
+        # Microstructure Features (Fase 1 - Real-time Order Book)
+        if microstructure_df is not None and not microstructure_df.empty:
+            try:
+                # Resample a 4h (las features microestructurales vienen cada 1s o 10s)
+                micro_res = microstructure_df.resample('4h').agg({
+                    # OBI (Order Book Imbalance) - promedio en la ventana
+                    'obi_5': 'mean',
+                    'obi_10': 'mean',
+                    'obi_20': 'mean',
+
+                    # VPIN (Informed Trading Probability) - promedio y máximo
+                    'vpin': ['mean', 'max'],
+
+                    # OFI (Order Flow Imbalance) - suma acumulada
+                    'ofi': 'sum',
+
+                    # Spread metrics
+                    'spread': 'mean',
+                    'spread_bps': 'mean',
+
+                    # Price metrics
+                    'micro_price': 'mean',
+
+                    # Kyle's Lambda (price impact)
+                    'kyle_lambda': 'mean',
+
+                    # Roll Spread
+                    'roll_spread': 'mean'
+                })
+
+                # Flatten multi-level columns
+                micro_res.columns = ['_'.join(col).strip('_') if isinstance(col, tuple) else col
+                                    for col in micro_res.columns]
+
+                df = df.join(micro_res, how='left')
+                logger.info(f"✓ Microstructure features agregadas: {list(micro_res.columns)}")
+
+                # Crear features derivadas
+                if 'obi_5_mean' in df.columns and 'obi_20_mean' in df.columns:
+                    # OBI divergence: cuando el corto plazo difiere del largo plazo
+                    df['obi_divergence'] = df['obi_5_mean'] - df['obi_20_mean']
+
+                if 'vpin_mean' in df.columns:
+                    # VPIN regime: alta toxicidad vs normal
+                    df['vpin_regime'] = (df['vpin_mean'] > 0.4).astype(int)
+
+                if 'spread_bps_mean' in df.columns:
+                    # Spread widening: indicador de volatilidad
+                    df['spread_widening'] = df['spread_bps_mean'].pct_change()
+
+            except Exception as e:
+                logger.warning(f"⚠️ Error agregando microstructure features: {e}")
+
+        # Fill NaN para microstructure features si no se agregaron
+        micro_cols = ['obi_5_mean', 'obi_10_mean', 'obi_20_mean', 'vpin_mean', 'vpin_max',
+                     'ofi_sum', 'spread_mean', 'spread_bps_mean', 'micro_price_mean',
+                     'kyle_lambda_mean', 'roll_spread_mean', 'obi_divergence',
+                     'vpin_regime', 'spread_widening']
+        for col in micro_cols:
             if col not in df.columns:
                 df[col] = 0.0
             else:

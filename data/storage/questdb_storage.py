@@ -19,9 +19,16 @@ import asyncio
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-import psycopg2
-from psycopg2.extras import execute_batch
 from contextlib import contextmanager
+
+# Lazy import de psycopg2 (opcional si no tienes QuestDB)
+try:
+    import psycopg2
+    from psycopg2.extras import execute_batch
+    PSYCOPG2_AVAILABLE = True
+except ImportError:
+    PSYCOPG2_AVAILABLE = False
+    logging.warning("psycopg2 no disponible - QuestDB storage deshabilitado")
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +49,11 @@ class QuestDBStorage:
         user: str = "admin",
         password: str = "quest"
     ):
+        if not PSYCOPG2_AVAILABLE:
+            raise ImportError(
+                "psycopg2 no está instalado. Instala con: pip install psycopg2-binary"
+            )
+
         self.host = host
         self.port = port
         self.database = database
