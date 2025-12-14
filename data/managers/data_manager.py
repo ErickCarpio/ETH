@@ -256,15 +256,18 @@ class DataManager:
 
                 result['coinglass'] = coinglass_df
 
-            # 7. Microstructure Features (Fase 1 - QuestDB)
-            # Solo se incluyen si hay datos en QuestDB (no fallback a caché)
+            # 7. Microstructure Features (Fase 1)
+            # Prioridad: 1) QuestDB, 2) Archivos históricos generados, 3) Vacío
+            microstructure_df = pd.DataFrame()
+
+            # Opción 1: Intentar cargar desde QuestDB (datos en tiempo real)
             try:
                 from data.storage.unified_storage import UnifiedQuestDBStorage
 
                 storage = UnifiedQuestDBStorage()
 
                 if storage.is_available:
-                    logger.info("📊 Cargando features microestructurales desde QuestDB...")
+                    logger.info("📊 Intentando cargar features microestructurales desde QuestDB...")
 
                     # Query últimos N días de features
                     end_time = datetime.now()
@@ -293,22 +296,36 @@ class DataManager:
                     symbol_base = self.symbol.replace('/', '')  # "ETHUSDT"
                     micro_results = storage.query(sql, (symbol_base, start_time, end_time))
 
-                    if micro_results:
+                    if micro_results and len(micro_results) > 0:
                         microstructure_df = pd.DataFrame(micro_results)
                         microstructure_df['timestamp'] = pd.to_datetime(microstructure_df['timestamp'])
                         microstructure_df.set_index('timestamp', inplace=True)
-
-                        result['microstructure'] = microstructure_df
-                        logger.info(f"✓ Microstructure data cargada: {len(microstructure_df)} registros")
-                    else:
-                        logger.warning("⚠️ No hay microstructure data en QuestDB")
-                        result['microstructure'] = pd.DataFrame()
-                else:
-                    logger.warning("⚠️ QuestDB no disponible - sin microstructure features")
-                    result['microstructure'] = pd.DataFrame()
+                        logger.info(f"✓ Microstructure data cargada desde QuestDB: {len(microstructure_df)} registros")
 
             except Exception as e:
-                logger.warning(f"⚠️ Error cargando microstructure features: {e}")
+                logger.debug(f"QuestDB no disponible: {e}")
+
+            # Opción 2: Si no hay datos de QuestDB, intentar cargar archivo histórico generado
+            if microstructure_df.empty:
+                logger.info("📂 Intentando cargar features microestructurales desde archivos históricos...")
+
+                safe_symbol = self.symbol.replace('/', '_')
+                historical_file = self.data_dir / f"microstructure_historical_{safe_symbol}.parquet"
+
+                if historical_file.exists():
+                    try:
+                        microstructure_df = pd.read_parquet(historical_file)
+                        logger.info(f"✓ Microstructure data cargada desde archivo: {len(microstructure_df)} registros")
+                        logger.info(f"   Archivo: {historical_file}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error cargando archivo histórico: {e}")
+
+            # Si hay datos, agregarlos al resultado
+            if not microstructure_df.empty:
+                result['microstructure'] = microstructure_df
+            else:
+                logger.warning("⚠️ No hay microstructure features disponibles")
+                logger.info("   💡 Puedes generarlas con: python generate_historical_microstructure.py")
                 result['microstructure'] = pd.DataFrame()
 
             return result
