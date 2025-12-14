@@ -31,7 +31,84 @@ class FeatureEngineer:
         # ATR 14
         tr = pd.concat([df['high']-df['low'], (df['high']-df['close'].shift()).abs(), (df['low']-df['close'].shift()).abs()], axis=1).max(axis=1)
         df['atr_14'] = tr.rolling(14).mean()
-            
+
+        # ===== PHASE 3: STATISTICAL FEATURES =====
+
+        # Rolling Statistics (skewness, kurtosis) sobre ventanas variables
+        for w in [12, 24, 72]:  # 12h (2d), 24h (1d), 72h (3d)
+            # Skewness (asimetría) - detecta distribuciones asimétricas
+            df[f'returns_skew_{w}h'] = df['returns'].rolling(w).skew()
+
+            # Kurtosis (curtosis) - detecta colas gordas (risk of extreme moves)
+            df[f'returns_kurt_{w}h'] = df['returns'].rolling(w).kurt()
+
+            # Volume skew y kurtosis
+            df[f'volume_skew_{w}h'] = df['volume'].rolling(w).skew()
+            df[f'volume_kurt_{w}h'] = df['volume'].rolling(w).kurt()
+
+        # Autocorrelation of returns (momentum persistence)
+        df['returns_autocorr_6h'] = df['returns'].rolling(6).apply(lambda x: x.autocorr(), raw=False)
+        df['returns_autocorr_24h'] = df['returns'].rolling(24).apply(lambda x: x.autocorr(), raw=False)
+
+        # Volatility Clustering (GARCH-like)
+        # Si volatilidad actual > volatilidad pasada → clustering
+        df['vol_clustering_24h'] = df['volatility_24h'] / (df['volatility_24h'].shift(6) + 1e-8)
+
+        # Squared returns (proxy for realized variance)
+        df['returns_squared'] = df['returns'] ** 2
+        df['vol_garch_proxy'] = df['returns_squared'].rolling(24).mean()
+
+        # Volume Profile Features
+        # Price range vs volume
+        df['price_range'] = (df['high'] - df['low']) / (df['close'] + 1e-8)
+        df['volume_price_range'] = df['volume'] * df['price_range']
+
+        # Volume momentum
+        df['volume_ma_24h'] = df['volume'].rolling(24).mean()
+        df['volume_momentum'] = df['volume'] / (df['volume_ma_24h'] + 1e-8)
+
+        # Volume trend
+        df['volume_trend_24h'] = df['volume'].rolling(24).apply(
+            lambda x: 1 if x.iloc[-1] > x.iloc[0] else -1, raw=False
+        )
+
+        # Support/Resistance Detection (simplified)
+        # Local minima/maxima en ventanas rolling
+        df['is_local_min'] = ((df['low'] == df['low'].rolling(12, center=True).min())).astype(int)
+        df['is_local_max'] = ((df['high'] == df['high'].rolling(12, center=True).max())).astype(int)
+
+        # Distance to recent support/resistance
+        rolling_min = df['low'].rolling(72).min()
+        rolling_max = df['high'].rolling(72).max()
+
+        df['dist_to_support'] = (df['close'] - rolling_min) / (df['close'] + 1e-8)
+        df['dist_to_resistance'] = (rolling_max - df['close']) / (df['close'] + 1e-8)
+
+        # Support/Resistance strength (how many times price tested this level)
+        df['support_strength'] = (df['low'].rolling(72).apply(
+            lambda x: (abs(x - x.min()) < x.min() * 0.01).sum(), raw=False
+        ))
+
+        df['resistance_strength'] = (df['high'].rolling(72).apply(
+            lambda x: (abs(x - x.max()) < x.max() * 0.01).sum(), raw=False
+        ))
+
+        # Fill NaN from Phase 3 features
+        phase3_cols = [
+            'returns_skew_12h', 'returns_skew_24h', 'returns_skew_72h',
+            'returns_kurt_12h', 'returns_kurt_24h', 'returns_kurt_72h',
+            'volume_skew_12h', 'volume_skew_24h', 'volume_skew_72h',
+            'volume_kurt_12h', 'volume_kurt_24h', 'volume_kurt_72h',
+            'returns_autocorr_6h', 'returns_autocorr_24h',
+            'vol_clustering_24h', 'returns_squared', 'vol_garch_proxy',
+            'price_range', 'volume_price_range', 'volume_ma_24h', 'volume_momentum', 'volume_trend_24h',
+            'is_local_min', 'is_local_max', 'dist_to_support', 'dist_to_resistance',
+            'support_strength', 'resistance_strength'
+        ]
+        for col in phase3_cols:
+            if col in df.columns:
+                df[col] = df[col].fillna(0)
+
         return df
     
     def merge_macro_features(self, df: pd.DataFrame, macro_df: pd.DataFrame) -> pd.DataFrame:
