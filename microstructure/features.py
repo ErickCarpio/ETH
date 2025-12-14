@@ -380,6 +380,209 @@ class MicrostructureFeatures:
             trade["is_buy"]
         )
 
+    def calculate_trade_flow_toxicity(self, window: int = 50) -> Optional[float]:
+        """
+        Calcula Trade Flow Toxicity (Easley et al. 2012)
+
+        Toxicity mide cuánto revierte el precio después de un trade,
+        indicando si el trade contenía información adversa
+
+        Returns:
+            Toxicity score, o None si no hay suficientes datos
+        """
+        if len(self.trade_history) < window + 10:
+            return None
+
+        recent_trades = list(self.trade_history)[-window-10:]
+
+        toxicities = []
+        for i in range(len(recent_trades) - 10):
+            trade = recent_trades[i]
+
+            # Medir reversión de precio en próximos 10 trades
+            future_prices = [t["price"] for t in recent_trades[i+1:i+11]]
+            if not future_prices:
+                continue
+
+            avg_future_price = np.mean(future_prices)
+
+            # Toxicity = (future_price - trade_price) * direction
+            # Si compro y el precio baja después -> tóxico (perdí)
+            direction = 1 if trade["is_buy"] else -1
+            toxicity = (avg_future_price - trade["price"]) * direction
+
+            toxicities.append(toxicity)
+
+        if toxicities:
+            return np.mean(toxicities)
+
+        return None
+
+    def calculate_realized_spread(self, window: int = 20) -> Optional[float]:
+        """
+        Calcula Realized Spread
+
+        Realized spread mide cuánto del effective spread se debe a
+        adverse selection vs. liquidity provision
+
+        Returns:
+            Realized spread promedio, o None si no hay suficientes datos
+        """
+        if len(self.trade_history) < window + 5:
+            return None
+
+        recent_trades = list(self.trade_history)[-window-5:]
+
+        realized_spreads = []
+        for i in range(len(recent_trades) - 5):
+            trade = recent_trades[i]
+
+            # Precio mid 5 trades después
+            future_prices = [t["price"] for t in recent_trades[i+1:i+6]]
+            if not future_prices:
+                continue
+
+            future_mid = np.mean(future_prices)
+
+            # Realized spread
+            if trade["is_buy"]:
+                rs = 2 * (trade["price"] - future_mid)
+            else:
+                rs = 2 * (future_mid - trade["price"])
+
+            realized_spreads.append(rs)
+
+        if realized_spreads:
+            return np.mean(realized_spreads)
+
+        return None
+
+    def calculate_quote_intensity(self, window_seconds: int = 60) -> float:
+        """
+        Calcula Quote Intensity (actualizaciones del order book por segundo)
+
+        High quote intensity puede indicar:
+        - Alta actividad de market makers
+        - Quote stuffing (manipulación)
+        - Alta volatilidad esperada
+
+        Args:
+            window_seconds: Ventana de tiempo para calcular intensidad
+
+        Returns:
+            Quotes por segundo
+        """
+        if len(self.ob_history) < 2:
+            return 0.0
+
+        recent_obs = list(self.ob_history)[-100:]  # Últimos 100 snapshots
+
+        if len(recent_obs) < 2:
+            return 0.0
+
+        # Calcular tiempo transcurrido
+        first_time = recent_obs[0].get("timestamp")
+        last_time = recent_obs[-1].get("timestamp")
+
+        if not first_time or not last_time:
+            return 0.0
+
+        from datetime import datetime
+        if isinstance(first_time, datetime):
+            elapsed = (last_time - first_time).total_seconds()
+        else:
+            elapsed = (last_time - first_time) / 1000.0  # milisegundos
+
+        if elapsed > 0:
+            return len(recent_obs) / elapsed
+
+        return 0.0
+
+    def calculate_order_arrival_rate(self, window: int = 50) -> float:
+        """
+        Calcula Order Arrival Rate (trades por minuto)
+
+        High arrival rate indica:
+        - Alta actividad / liquidez
+        - Posible evento de noticias
+        - Aumenta probabilidad de informed trading
+
+        Args:
+            window: Número de trades para calcular rate
+
+        Returns:
+            Trades por minuto
+        """
+        if len(self.trade_history) < 2:
+            return 0.0
+
+        recent_trades = list(self.trade_history)[-window:]
+
+        if len(recent_trades) < 2:
+            return 0.0
+
+        first_time = recent_trades[0].get("timestamp")
+        last_time = recent_trades[-1].get("timestamp")
+
+        if not first_time or not last_time:
+            return 0.0
+
+        from datetime import datetime
+        if isinstance(first_time, datetime):
+            elapsed_minutes = (last_time - first_time).total_seconds() / 60.0
+        else:
+            elapsed_minutes = (last_time - first_time) / 60000.0  # milisegundos
+
+        if elapsed_minutes > 0:
+            return len(recent_trades) / elapsed_minutes
+
+        return 0.0
+
+    def calculate_price_impact(self, trade_size: float, levels: int = 10) -> float:
+        """
+        Estima price impact para un trade de cierto tamaño
+
+        Simula ejecutar un market order y calcula cuánto se movería el precio
+
+        Args:
+            trade_size: Tamaño del trade hipotético
+            levels: Niveles del order book a considerar
+
+        Returns:
+            Price impact estimado (bps)
+        """
+        if not self.ob_history:
+            return 0.0
+
+        latest_ob = self.ob_history[-1]
+
+        if "bids" not in latest_ob or "asks" not in latest_ob:
+            return 0.0
+
+        mid_price = latest_ob.get("mid_price", 0)
+        if mid_price == 0:
+            return 0.0
+
+        # Simular sell (walk down the bids)
+        bids = latest_ob["bids"][:levels]
+        remaining = trade_size
+        total_cost = 0.0
+
+        for price, qty in bids:
+            if remaining <= 0:
+                break
+
+            fill_qty = min(remaining, qty)
+            total_cost += fill_qty * price
+            remaining -= fill_qty
+
+        if trade_size > 0 and total_cost > 0:
+            avg_price = total_cost / (trade_size - remaining)
+            impact_bps = abs(avg_price - mid_price) / mid_price * 10000
+            return impact_bps
+
+        return 0.0
+
     def get_all_features(
         self,
         current_orderbook: Dict,
@@ -435,6 +638,19 @@ class MicrostructureFeatures:
                 current_orderbook["mid_price"],
                 last_trade["is_buy"]
             )
+
+        # Advanced features
+        toxicity = self.calculate_trade_flow_toxicity()
+        features["trade_flow_toxicity"] = toxicity if toxicity is not None else 0.0
+
+        realized_spread = self.calculate_realized_spread()
+        features["realized_spread"] = realized_spread if realized_spread is not None else 0.0
+
+        features["quote_intensity"] = self.calculate_quote_intensity()
+        features["order_arrival_rate"] = self.calculate_order_arrival_rate()
+
+        # Price impact para trade de tamaño estándar (1 ETH)
+        features["price_impact_1eth"] = self.calculate_price_impact(1.0)
 
         return features
 

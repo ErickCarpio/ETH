@@ -194,6 +194,85 @@ class QuestDBStorage:
         except Exception as e:
             logger.error(f"❌ Error creando tabla trades: {e}")
 
+    def create_funding_rate_table(self):
+        """
+        Crea tabla para funding rates
+        """
+        sql = """
+        CREATE TABLE IF NOT EXISTS funding_rates (
+            timestamp TIMESTAMP,
+            symbol SYMBOL,
+            funding_rate DOUBLE,
+            funding_rate_delta DOUBLE,
+            mark_price DOUBLE
+        ) TIMESTAMP(timestamp) PARTITION BY DAY;
+        """
+
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql)
+                    conn.commit()
+            logger.info("✅ Tabla funding_rates creada/verificada")
+        except Exception as e:
+            logger.error(f"❌ Error creando tabla funding_rates: {e}")
+
+    def create_liquidations_table(self):
+        """
+        Crea tabla para liquidaciones
+        """
+        sql = """
+        CREATE TABLE IF NOT EXISTS liquidations (
+            timestamp TIMESTAMP,
+            symbol SYMBOL,
+            side SYMBOL,
+            quantity DOUBLE,
+            price DOUBLE,
+            avg_price DOUBLE,
+            notional DOUBLE
+        ) TIMESTAMP(timestamp) PARTITION BY DAY;
+        """
+
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql)
+                    conn.commit()
+            logger.info("✅ Tabla liquidations creada/verificada")
+        except Exception as e:
+            logger.error(f"❌ Error creando tabla liquidations: {e}")
+
+    def create_open_interest_table(self):
+        """
+        Crea tabla para Open Interest
+        """
+        sql = """
+        CREATE TABLE IF NOT EXISTS open_interest (
+            timestamp TIMESTAMP,
+            symbol SYMBOL,
+            oi DOUBLE,
+            oi_delta DOUBLE,
+            oi_delta_pct DOUBLE
+        ) TIMESTAMP(timestamp) PARTITION BY DAY;
+        """
+
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql)
+                    conn.commit()
+            logger.info("✅ Tabla open_interest creada/verificada")
+        except Exception as e:
+            logger.error(f"❌ Error creando tabla open_interest: {e}")
+
+    def create_derivatives_tables(self):
+        """
+        Inicializa todas las tablas de derivados
+        """
+        self.create_funding_rate_table()
+        self.create_liquidations_table()
+        self.create_open_interest_table()
+
     def initialize_tables(self):
         """
         Inicializa todas las tablas necesarias
@@ -201,6 +280,7 @@ class QuestDBStorage:
         self.create_orderbook_table()
         self.create_microstructure_features_table()
         self.create_trades_table()
+        self.create_derivatives_tables()
 
     def insert_orderbook_snapshot(self, snapshot: Dict):
         """
@@ -298,6 +378,74 @@ class QuestDBStorage:
         if len(self.batches[table]) >= self.batch_size:
             self.flush_batch(table)
 
+    def insert_funding_rate(self, data: Dict):
+        """
+        Inserta funding rate
+        """
+        table = "funding_rates"
+
+        row = (
+            data.get("timestamp"),
+            data.get("symbol"),
+            data.get("funding_rate"),
+            data.get("funding_rate_delta"),
+            data.get("mark_price")
+        )
+
+        if table not in self.batches:
+            self.batches[table] = []
+
+        self.batches[table].append(row)
+
+        if len(self.batches[table]) >= self.batch_size:
+            self.flush_batch(table)
+
+    def insert_liquidation(self, data: Dict):
+        """
+        Inserta liquidación
+        """
+        table = "liquidations"
+
+        row = (
+            data.get("timestamp"),
+            data.get("symbol"),
+            data.get("side"),
+            data.get("quantity"),
+            data.get("price"),
+            data.get("avg_price"),
+            data.get("notional")
+        )
+
+        if table not in self.batches:
+            self.batches[table] = []
+
+        self.batches[table].append(row)
+
+        if len(self.batches[table]) >= self.batch_size:
+            self.flush_batch(table)
+
+    def insert_open_interest(self, data: Dict):
+        """
+        Inserta Open Interest
+        """
+        table = "open_interest"
+
+        row = (
+            data.get("timestamp"),
+            data.get("symbol"),
+            data.get("oi"),
+            data.get("oi_delta"),
+            data.get("oi_delta_pct")
+        )
+
+        if table not in self.batches:
+            self.batches[table] = []
+
+        self.batches[table].append(row)
+
+        if len(self.batches[table]) >= self.batch_size:
+            self.flush_batch(table)
+
     def flush_batch(self, table: str):
         """
         Escribe un batch completo a QuestDB
@@ -323,6 +471,18 @@ class QuestDBStorage:
         elif table == "trades":
             sql = """
             INSERT INTO trades VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """
+        elif table == "funding_rates":
+            sql = """
+            INSERT INTO funding_rates VALUES (%s, %s, %s, %s, %s)
+            """
+        elif table == "liquidations":
+            sql = """
+            INSERT INTO liquidations VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """
+        elif table == "open_interest":
+            sql = """
+            INSERT INTO open_interest VALUES (%s, %s, %s, %s, %s)
             """
         else:
             logger.error(f"❌ Tabla desconocida: {table}")
