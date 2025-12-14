@@ -328,6 +328,114 @@ class DataManager:
                 logger.info("   💡 Puedes generarlas con: python generate_historical_microstructure.py")
                 result['microstructure'] = pd.DataFrame()
 
+            # 8. Derivatives Features (Fase 2 - Funding, Liquidations, OI)
+            derivatives_df = pd.DataFrame()
+
+            # Cargar desde QuestDB
+            try:
+                from data.storage.questdb_storage import QuestDBStorage
+
+                storage = QuestDBStorage()
+
+                # Query para funding rates con features calculadas
+                funding_sql = """
+                SELECT timestamp, funding_rate, funding_rate_delta, mark_price
+                FROM funding_rates
+                WHERE symbol = %s
+                  AND timestamp >= %s
+                  AND timestamp < %s
+                ORDER BY timestamp ASC
+                """
+
+                funding_results = storage.query(funding_sql, (safe_symbol.replace('_', ''), start_date, end_date))
+
+                funding_df = pd.DataFrame()
+                if funding_results and len(funding_results) > 0:
+                    funding_df = pd.DataFrame(funding_results)
+                    funding_df['timestamp'] = pd.to_datetime(funding_df['timestamp'])
+                    funding_df.set_index('timestamp', inplace=True)
+
+                    # Calcular MA y STD
+                    funding_df['funding_rate_ma_10'] = funding_df['funding_rate'].rolling(10).mean()
+                    funding_df['funding_rate_std_10'] = funding_df['funding_rate'].rolling(10).std()
+
+                # Query para liquidations
+                liq_sql = """
+                SELECT timestamp, side, quantity, notional
+                FROM liquidations
+                WHERE symbol = %s
+                  AND timestamp >= %s
+                  AND timestamp < %s
+                ORDER BY timestamp ASC
+                """
+
+                liq_results = storage.query(liq_sql, (safe_symbol.replace('_', ''), start_date, end_date))
+
+                liq_df = pd.DataFrame()
+                if liq_results and len(liq_results) > 0:
+                    liq_df_raw = pd.DataFrame(liq_results)
+                    liq_df_raw['timestamp'] = pd.to_datetime(liq_df_raw['timestamp'])
+                    liq_df_raw.set_index('timestamp', inplace=True)
+
+                    # Agregar a ventanas de 5 minutos
+                    liq_df = liq_df_raw.resample('5min').agg({
+                        'quantity': 'sum',
+                        'notional': 'sum'
+                    })
+                    liq_df.columns = ['liq_volume_5m', 'liq_notional_5m']
+                    liq_df['liq_count_5m'] = liq_df_raw.resample('5min').size()
+
+                    # Long vs Short
+                    long_count = liq_df_raw[liq_df_raw['side'] == 'SELL'].resample('5min').size()
+                    short_count = liq_df_raw[liq_df_raw['side'] == 'BUY'].resample('5min').size()
+                    total_count = liq_df['liq_count_5m']
+
+                    liq_df['liq_long_pct'] = (long_count / (total_count + 1e-8) * 100).fillna(0)
+                    liq_df['liq_short_pct'] = (short_count / (total_count + 1e-8) * 100).fillna(0)
+                    liq_df['liq_imbalance'] = ((long_count - short_count) / (total_count + 1e-8)).fillna(0)
+
+                # Query para Open Interest
+                oi_sql = """
+                SELECT timestamp, oi, oi_delta, oi_delta_pct
+                FROM open_interest
+                WHERE symbol = %s
+                  AND timestamp >= %s
+                  AND timestamp < %s
+                ORDER BY timestamp ASC
+                """
+
+                oi_results = storage.query(oi_sql, (safe_symbol.replace('_', ''), start_date, end_date))
+
+                oi_df = pd.DataFrame()
+                if oi_results and len(oi_results) > 0:
+                    oi_df = pd.DataFrame(oi_results)
+                    oi_df['timestamp'] = pd.to_datetime(oi_df['timestamp'])
+                    oi_df.set_index('timestamp', inplace=True)
+
+                # Combinar todos los DataFrames
+                if not funding_df.empty:
+                    derivatives_df = funding_df
+
+                    if not liq_df.empty:
+                        derivatives_df = derivatives_df.join(liq_df, how='outer')
+
+                    if not oi_df.empty:
+                        derivatives_df = derivatives_df.join(oi_df, how='outer')
+
+                    derivatives_df = derivatives_df.fillna(method='ffill').fillna(0)
+                    logger.info(f"✓ Derivatives data cargada desde QuestDB: {len(derivatives_df)} registros")
+
+            except Exception as e:
+                logger.debug(f"QuestDB derivatives no disponible: {e}")
+
+            # Si hay datos, agregarlos al resultado
+            if not derivatives_df.empty:
+                result['derivatives'] = derivatives_df
+            else:
+                logger.warning("⚠️ No hay derivatives features disponibles")
+                logger.info("   💡 Puedes recolectarlas con: python collect_derivatives.py")
+                result['derivatives'] = pd.DataFrame()
+
             return result
         finally:
             await self.close_exchange()

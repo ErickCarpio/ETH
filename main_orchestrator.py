@@ -157,7 +157,8 @@ class TradingSystemOrchestrator:
             sentiment_df=dataset.get('sentiment'),
             defillama_df=dataset.get('defillama'),
             coinglass_df=dataset.get('coinglass'),
-            microstructure_df=dataset.get('microstructure')
+            microstructure_df=dataset.get('microstructure'),
+            derivatives_df=dataset.get('derivatives')
         )
         
         # Etiquetar régimen

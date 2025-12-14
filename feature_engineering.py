@@ -61,7 +61,7 @@ class FeatureEngineer:
         return df
 
     def build_full_features(self, crypto_df, macro_df, onchain_df=None, sentiment_df=None,
-                           defillama_df=None, coinglass_df=None, microstructure_df=None):
+                           defillama_df=None, coinglass_df=None, microstructure_df=None, derivatives_df=None):
         logger.info("Construyendo features...")
         df = self.create_technical_features(crypto_df)
 
@@ -181,6 +181,72 @@ class FeatureEngineer:
                      'kyle_lambda_mean', 'roll_spread_mean', 'obi_divergence',
                      'vpin_regime', 'spread_widening']
         for col in micro_cols:
+            if col not in df.columns:
+                df[col] = 0.0
+            else:
+                df[col] = df[col].fillna(0)
+
+        # Derivatives Features (Fase 2 - Funding, Liquidations, Open Interest)
+        if derivatives_df is not None and not derivatives_df.empty:
+            try:
+                # Resample a 4h (datos vienen cada 1s para funding, 30s para OI)
+                deriv_res = derivatives_df.resample('4h').agg({
+                    # Funding Rate
+                    'funding_rate': 'last',  # Último valor
+                    'funding_rate_ma_10': 'last',
+                    'funding_rate_std_10': 'last',
+                    'funding_rate_delta': 'sum',  # Cambio total en 4h
+
+                    # Liquidations (sum over 4h window)
+                    'liq_count_5m': 'sum',
+                    'liq_volume_5m': 'sum',
+                    'liq_notional_5m': 'sum',
+                    'liq_long_pct': 'mean',  # Promedio de %
+                    'liq_short_pct': 'mean',
+                    'liq_imbalance': 'mean',
+
+                    # Open Interest
+                    'oi': 'last',  # Último valor
+                    'oi_delta': 'sum',  # Delta total en 4h
+                    'oi_delta_pct': 'mean'
+                })
+
+                # Flatten columns si hay multi-level
+                deriv_res.columns = ['_'.join(col).strip('_') if isinstance(col, tuple) else col
+                                    for col in deriv_res.columns]
+
+                df = df.join(deriv_res, how='left')
+                logger.info(f"✓ Derivatives features agregadas: {list(deriv_res.columns)}")
+
+                # Crear features derivadas
+                if 'funding_rate_last' in df.columns:
+                    # Funding rate regime
+                    df['funding_extreme'] = (abs(df['funding_rate_last']) > 0.0005).astype(int)
+
+                    # Funding rate momentum (cambio en funding)
+                    df['funding_momentum'] = df['funding_rate_last'].diff()
+
+                if 'liq_imbalance_mean' in df.columns:
+                    # Liquidation cascade: muchas liquidaciones con fuerte imbalance
+                    df['liq_cascade_risk'] = (
+                        (df['liq_count_5m_sum'] > df['liq_count_5m_sum'].quantile(0.75)) &
+                        (abs(df['liq_imbalance_mean']) > 0.5)
+                    ).astype(int)
+
+                if 'oi_last' in df.columns and 'oi_delta_sum' in df.columns:
+                    # OI change rate
+                    df['oi_change_rate'] = df['oi_delta_sum'] / (df['oi_last'] + 1e-8)
+
+            except Exception as e:
+                logger.warning(f"⚠️ Error agregando derivatives features: {e}")
+
+        # Fill NaN para derivatives features si no se agregaron
+        deriv_cols = ['funding_rate_last', 'funding_rate_ma_10_last', 'funding_rate_std_10_last',
+                     'funding_rate_delta_sum', 'liq_count_5m_sum', 'liq_volume_5m_sum',
+                     'liq_notional_5m_sum', 'liq_long_pct_mean', 'liq_short_pct_mean',
+                     'liq_imbalance_mean', 'oi_last', 'oi_delta_sum', 'oi_delta_pct_mean',
+                     'funding_extreme', 'funding_momentum', 'liq_cascade_risk', 'oi_change_rate']
+        for col in deriv_cols:
             if col not in df.columns:
                 df[col] = 0.0
             else:
