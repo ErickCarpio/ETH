@@ -363,69 +363,10 @@ class FeatureEngineer:
             else:
                 df[col] = df[col].fillna(0)
 
-        # Microstructure Features (Fase 1 - Real-time Order Book)
-        if microstructure_df is not None and not microstructure_df.empty:
-            try:
-                # Resample a 4h (las features microestructurales vienen cada 1s o 10s)
-                micro_res = microstructure_df.resample('4h').agg({
-                    # OBI (Order Book Imbalance) - promedio en la ventana
-                    'obi_5': 'mean',
-                    'obi_10': 'mean',
-                    'obi_20': 'mean',
-
-                    # VPIN (Informed Trading Probability) - promedio y máximo
-                    'vpin': ['mean', 'max'],
-
-                    # OFI (Order Flow Imbalance) - suma acumulada
-                    'ofi': 'sum',
-
-                    # Spread metrics
-                    'spread': 'mean',
-                    'spread_bps': 'mean',
-
-                    # Price metrics
-                    'micro_price': 'mean',
-
-                    # Kyle's Lambda (price impact)
-                    'kyle_lambda': 'mean',
-
-                    # Roll Spread
-                    'roll_spread': 'mean'
-                })
-
-                # Flatten multi-level columns
-                micro_res.columns = ['_'.join(col).strip('_') if isinstance(col, tuple) else col
-                                    for col in micro_res.columns]
-
-                df = df.join(micro_res, how='left')
-                logger.info(f"✓ Microstructure features agregadas: {list(micro_res.columns)}")
-
-                # Crear features derivadas
-                if 'obi_5_mean' in df.columns and 'obi_20_mean' in df.columns:
-                    # OBI divergence: cuando el corto plazo difiere del largo plazo
-                    df['obi_divergence'] = df['obi_5_mean'] - df['obi_20_mean']
-
-                if 'vpin_mean' in df.columns:
-                    # VPIN regime: alta toxicidad vs normal
-                    df['vpin_regime'] = (df['vpin_mean'] > 0.4).astype(int)
-
-                if 'spread_bps_mean' in df.columns:
-                    # Spread widening: indicador de volatilidad
-                    df['spread_widening'] = df['spread_bps_mean'].pct_change()
-
-            except Exception as e:
-                logger.warning(f"⚠️ Error agregando microstructure features: {e}")
-
-        # Fill NaN para microstructure features si no se agregaron
-        micro_cols = ['obi_5_mean', 'obi_10_mean', 'obi_20_mean', 'vpin_mean', 'vpin_max',
-                     'ofi_sum', 'spread_mean', 'spread_bps_mean', 'micro_price_mean',
-                     'kyle_lambda_mean', 'roll_spread_mean', 'obi_divergence',
-                     'vpin_regime', 'spread_widening']
-        for col in micro_cols:
-            if col not in df.columns:
-                df[col] = 0.0
-            else:
-                df[col] = df[col].fillna(0)
+        # ===== MICROSTRUCTURE FEATURES REMOVED =====
+        # Phase 1 features (OBI, VPIN, Spread, Depth) removed - no real order book data available
+        # These will be re-implemented when WebSocket + Order Book L2 infrastructure is ready
+        # See: PLAN_ONLY_REAL_DATA.md for implementation roadmap
 
         # Derivatives Features (Fase 2 - Funding, Liquidations, Open Interest)
         if derivatives_df is not None and not derivatives_df.empty:
@@ -621,16 +562,8 @@ class FeatureEngineer:
         if 'RSI_14' in df.columns and 'volatility_24h' in df.columns:
             df['rsi_vol_interaction'] = (df['RSI_14'] - 50) * df['volatility_24h']
 
-        # 2. MICROSTRUCTURE × PRICE INTERACTIONS
-        if 'obi_5_mean' in df.columns and 'returns' in df.columns:
-            df['obi_returns_sync'] = df['obi_5_mean'] * df['returns']
-            df['obi_returns_divergence'] = abs(df['obi_5_mean'] - df['returns'])
-
-        if 'vpin_mean' in df.columns and 'volatility_24h' in df.columns:
-            df['vpin_vol_stress'] = df['vpin_mean'] * df['volatility_24h']
-
-        if 'spread_bps_mean' in df.columns and 'volume' in df.columns:
-            df['spread_volume_impact'] = df['spread_bps_mean'] * np.log1p(df['volume'])
+        # 2. MICROSTRUCTURE × PRICE INTERACTIONS - REMOVED (no real order book data)
+        # obi_returns_sync, obi_returns_divergence, vpin_vol_stress, spread_volume_impact removed
 
         # 3. DERIVATIVES × PRICE INTERACTIONS
         if 'funding_rate_last' in df.columns and 'returns' in df.columns:
@@ -656,29 +589,15 @@ class FeatureEngineer:
         if 'volatility_6h' in df.columns and 'volatility_72h' in df.columns:
             df['volatility_expansion'] = df['volatility_6h'] / (df['volatility_72h'] + 1e-8)
 
-        # Microstructure ratios
-        if 'obi_5_mean' in df.columns and 'obi_20_mean' in df.columns:
-            df['obi_depth_ratio'] = df['obi_5_mean'] / (abs(df['obi_20_mean']) + 1e-8)
-
-        if 'spread_bps_mean' in df.columns and 'volatility_24h' in df.columns:
-            df['spread_vol_ratio'] = df['spread_bps_mean'] / (df['volatility_24h'] * 10000 + 1e-8)
+        # Microstructure ratios - REMOVED (no real order book data)
+        # obi_depth_ratio, spread_vol_ratio removed
 
         # Derivatives ratios
         if 'liq_long_pct_mean' in df.columns and 'liq_short_pct_mean' in df.columns:
             df['liq_long_short_ratio'] = df['liq_long_pct_mean'] / (df['liq_short_pct_mean'] + 1e-8)
 
         # 5. CONDITIONAL FEATURES (If-Then Logic)
-        # High volatility + high VPIN = extreme risk
-        if 'volatility_24h' in df.columns and 'vpin_mean' in df.columns:
-            vol_high = df['volatility_24h'] > df['volatility_24h'].quantile(0.75)
-            vpin_high = df['vpin_mean'] > 0.5
-            df['extreme_risk_regime'] = (vol_high & vpin_high).astype(int)
-
-        # Low liquidity (wide spread) + high volume = manipulation signal
-        if 'spread_bps_mean' in df.columns and 'volume' in df.columns:
-            spread_wide = df['spread_bps_mean'] > df['spread_bps_mean'].quantile(0.75)
-            volume_high = df['volume'] > df['volume'].quantile(0.75)
-            df['manipulation_signal'] = (spread_wide & volume_high).astype(int)
+        # extreme_risk_regime, manipulation_signal REMOVED (use VPIN, spread - no real data)
 
         # High funding + increasing OI = overleveraged longs
         if 'funding_rate_last' in df.columns and 'oi_change_rate' in df.columns:
@@ -692,19 +611,14 @@ class FeatureEngineer:
             price_drop = df['returns'] < -0.02
             df['capitulation_signal'] = (cascade_risk & price_drop).astype(int)
 
-        # OBI divergence + price near resistance = rejection
-        if 'obi_5_mean' in df.columns and 'dist_to_resistance' in df.columns:
-            obi_negative = df['obi_5_mean'] < -0.1
-            near_resistance = df['dist_to_resistance'] < 0.02
-            df['resistance_rejection'] = (obi_negative & near_resistance).astype(int)
+        # resistance_rejection REMOVED (uses OBI - no real order book data)
 
         # 6. POLYNOMIAL FEATURES (Selected Key Features)
         # Square of important features
         if 'returns' in df.columns:
             df['returns_squared_interaction'] = df['returns'] ** 2
 
-        if 'obi_5_mean' in df.columns:
-            df['obi_squared'] = df['obi_5_mean'] ** 2
+        # obi_squared REMOVED (uses OBI - no real order book data)
 
         if 'funding_rate_last' in df.columns:
             df['funding_squared'] = df['funding_rate_last'] ** 2
@@ -745,13 +659,7 @@ class FeatureEngineer:
                 df['volume_momentum'] * 0.3
             )
 
-        # Combined liquidity stress
-        if 'spread_bps_mean' in df.columns and 'vpin_mean' in df.columns and 'liq_count_5m_sum' in df.columns:
-            spread_norm = (df['spread_bps_mean'] - df['spread_bps_mean'].mean()) / (df['spread_bps_mean'].std() + 1e-8)
-            vpin_norm = (df['vpin_mean'] - df['vpin_mean'].mean()) / (df['vpin_mean'].std() + 1e-8)
-            liq_norm = (df['liq_count_5m_sum'] - df['liq_count_5m_sum'].mean()) / (df['liq_count_5m_sum'].std() + 1e-8)
-
-            df['liquidity_stress_composite'] = (spread_norm + vpin_norm + liq_norm) / 3
+        # liquidity_stress_composite REMOVED (uses spread + VPIN - no real order book data)
 
         # Combined leverage risk
         if 'funding_rate_last' in df.columns and 'oi_change_rate' in df.columns and 'liq_count_5m_sum' in df.columns:
@@ -761,18 +669,25 @@ class FeatureEngineer:
 
             df['leverage_risk_composite'] = (funding_norm + oi_norm + liq_norm2) / 3
 
-        # Fill NaN for Phase 5 features
+        # Fill NaN for Phase 5 features (CLEANED - removed simulated microstructure features)
         phase5_cols = [
+            # Momentum × Volatility (3)
             'momentum_vol_interaction', 'returns_volatility_ratio', 'rsi_vol_interaction',
-            'obi_returns_sync', 'obi_returns_divergence', 'vpin_vol_stress', 'spread_volume_impact',
+            # Derivatives × Price (4)
             'funding_returns_carry', 'funding_returns_divergence', 'liq_price_confirmation', 'oi_volume_buildup',
+            # Ratios (3)
             'volume_ma_6h', 'volume_ma_72h', 'volume_trend_ratio', 'volatility_expansion',
-            'obi_depth_ratio', 'spread_vol_ratio', 'liq_long_short_ratio',
-            'extreme_risk_regime', 'manipulation_signal', 'overleveraged_longs', 'capitulation_signal', 'resistance_rejection',
-            'returns_squared_interaction', 'obi_squared', 'funding_squared',
+            'liq_long_short_ratio',
+            # Conditional (2 - removed 3)
+            'overleveraged_longs', 'capitulation_signal',
+            # Polynomial (2 - removed 1)
+            'returns_squared_interaction', 'funding_squared',
+            # Cross-products (3)
             'rsi_volume_momentum', 'distribution_risk', 'support_conviction',
+            # Regime (4)
             'regime_low_vol_up', 'regime_low_vol_down', 'regime_high_vol_up', 'regime_high_vol_down',
-            'momentum_composite', 'liquidity_stress_composite', 'leverage_risk_composite'
+            # Composites (2 - removed 1)
+            'momentum_composite', 'leverage_risk_composite'
         ]
         for col in phase5_cols:
             if col in df.columns:
