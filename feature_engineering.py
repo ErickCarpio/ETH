@@ -109,6 +109,170 @@ class FeatureEngineer:
             if col in df.columns:
                 df[col] = df[col].fillna(0)
 
+        # ===== PHASE 4: TSFRESH-INSPIRED FEATURES =====
+        # Implementación manual de features populares de tsfresh
+        # Más eficiente que correr tsfresh completo en cada timestep
+
+        # Change Quantiles - detecta magnitud de cambios en diferentes percentiles
+        for w in [12, 24]:
+            # Quantile changes in returns
+            df[f'returns_q10_{w}h'] = df['returns'].rolling(w).quantile(0.1)
+            df[f'returns_q90_{w}h'] = df['returns'].rolling(w).quantile(0.9)
+            df[f'returns_iqr_{w}h'] = df[f'returns_q90_{w}h'] - df[f'returns_q10_{w}h']
+
+        # Absolute Sum of Changes - momentum indicator
+        df['abs_sum_changes_24h'] = df['returns'].rolling(24).apply(lambda x: np.abs(np.diff(x)).sum(), raw=False)
+
+        # Count Above/Below Mean - regime persistence
+        for w in [12, 24]:
+            mean_val = df['close'].rolling(w).mean()
+            df[f'count_above_mean_{w}h'] = (df['close'] > mean_val).rolling(w).sum()
+            df[f'count_below_mean_{w}h'] = (df['close'] < mean_val).rolling(w).sum()
+
+        # Longest Strike Above/Below Mean - trend strength
+        def longest_strike_above_mean(x):
+            if len(x) < 2:
+                return 0
+            mean_val = x.mean()
+            above = x > mean_val
+            max_strike = 0
+            current_strike = 0
+            for val in above:
+                if val:
+                    current_strike += 1
+                    max_strike = max(max_strike, current_strike)
+                else:
+                    current_strike = 0
+            return max_strike
+
+        df['longest_strike_above_24h'] = df['close'].rolling(24).apply(longest_strike_above_mean, raw=False)
+
+        # Number of Crossings (mean) - volatility/indecision
+        def count_mean_crossings(x):
+            if len(x) < 2:
+                return 0
+            mean_val = x.mean()
+            above = x > mean_val
+            return (above.diff() != 0).sum()
+
+        df['mean_crossings_24h'] = df['close'].rolling(24).apply(count_mean_crossings, raw=False)
+
+        # Linear Trend - price/volume direction
+        def linear_trend_slope(x):
+            if len(x) < 2:
+                return 0
+            indices = np.arange(len(x))
+            try:
+                slope = np.polyfit(indices, x, 1)[0]
+                return slope
+            except:
+                return 0
+
+        df['price_trend_slope_24h'] = df['close'].rolling(24).apply(linear_trend_slope, raw=False)
+        df['volume_trend_slope_24h'] = df['volume'].rolling(24).apply(linear_trend_slope, raw=False)
+
+        # Variance Larger Than Standard Deviation - distribution check
+        df['var_larger_std_24h'] = (
+            df['returns'].rolling(24).var() > df['returns'].rolling(24).std()
+        ).astype(int)
+
+        # Ratio Beyond r Sigma - outlier detection
+        def ratio_beyond_r_sigma(x, r=2):
+            if len(x) < 2:
+                return 0
+            mean_val = x.mean()
+            std_val = x.std()
+            if std_val == 0:
+                return 0
+            beyond = np.abs(x - mean_val) > (r * std_val)
+            return beyond.sum() / len(x)
+
+        df['ratio_beyond_2sigma_24h'] = df['returns'].rolling(24).apply(
+            lambda x: ratio_beyond_r_sigma(x, r=2), raw=False
+        )
+
+        # Range Count - number of unique values in range
+        df['range_count_24h'] = df['close'].rolling(24).apply(lambda x: len(np.unique(x.round(2))), raw=False)
+
+        # Approximate Entropy - complexity measure
+        def approximate_entropy(x, m=2, r=0.2):
+            """Simplified ApEn calculation"""
+            if len(x) < m + 1:
+                return 0
+            try:
+                std_val = x.std()
+                if std_val == 0:
+                    return 0
+                r_scaled = r * std_val
+
+                def _maxdist(x_i, x_j, m):
+                    return max([abs(ua - va) for ua, va in zip(x_i, x_j)])
+
+                def _phi(m):
+                    patterns = np.array([[x[j] for j in range(i, i + m)] for i in range(len(x) - m + 1)])
+                    C = []
+                    for pattern in patterns:
+                        count = sum([1 for p in patterns if _maxdist(p, pattern, m) <= r_scaled])
+                        C.append(count / (len(x) - m + 1))
+                    return np.mean(np.log(C))
+
+                return abs(_phi(m) - _phi(m + 1))
+            except:
+                return 0
+
+        df['approx_entropy_24h'] = df['returns'].rolling(24).apply(
+            lambda x: approximate_entropy(x.values), raw=False
+        )
+
+        # Benford Correlation - first digit distribution (detects manipulation)
+        def benford_correlation(x):
+            """Correlation with Benford's Law"""
+            if len(x) < 2:
+                return 0
+            try:
+                # Get first digits
+                first_digits = []
+                for val in x:
+                    if val != 0:
+                        first_digit = int(str(abs(val)).replace('.', '')[0])
+                        if first_digit > 0:
+                            first_digits.append(first_digit)
+
+                if len(first_digits) < 2:
+                    return 0
+
+                # Benford distribution
+                benford = np.array([np.log10(1 + 1/d) for d in range(1, 10)])
+
+                # Observed distribution
+                observed = np.zeros(9)
+                for digit in first_digits:
+                    observed[digit - 1] += 1
+                observed = observed / observed.sum()
+
+                # Correlation
+                return np.corrcoef(benford, observed)[0, 1]
+            except:
+                return 0
+
+        df['benford_corr_24h'] = df['volume'].rolling(24).apply(benford_correlation, raw=False)
+
+        # Fill NaN from Phase 4 features
+        phase4_cols = [
+            'returns_q10_12h', 'returns_q90_12h', 'returns_iqr_12h',
+            'returns_q10_24h', 'returns_q90_24h', 'returns_iqr_24h',
+            'abs_sum_changes_24h',
+            'count_above_mean_12h', 'count_below_mean_12h',
+            'count_above_mean_24h', 'count_below_mean_24h',
+            'longest_strike_above_24h', 'mean_crossings_24h',
+            'price_trend_slope_24h', 'volume_trend_slope_24h',
+            'var_larger_std_24h', 'ratio_beyond_2sigma_24h',
+            'range_count_24h', 'approx_entropy_24h', 'benford_corr_24h'
+        ]
+        for col in phase4_cols:
+            if col in df.columns:
+                df[col] = df[col].fillna(0)
+
         return df
     
     def merge_macro_features(self, df: pd.DataFrame, macro_df: pd.DataFrame) -> pd.DataFrame:
