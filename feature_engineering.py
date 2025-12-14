@@ -237,15 +237,132 @@ class FeatureEngineer:
                     # OI change rate
                     df['oi_change_rate'] = df['oi_delta_sum'] / (df['oi_last'] + 1e-8)
 
+                # Advanced Ratios (Phase 2 completion)
+                if 'oi_last' in df.columns and 'volume' in df.columns:
+                    # OI/Volume ratio - indica apalancamiento del mercado
+                    df['oi_volume_ratio'] = df['oi_last'] / (df['volume'] + 1e-8)
+
+                if 'funding_rate_last' in df.columns and 'oi_last' in df.columns:
+                    # Funding/OI ratio - cost of leverage
+                    df['funding_oi_ratio'] = df['funding_rate_last'] * df['oi_last']
+
+                if 'liq_volume_5m_sum' in df.columns and 'volume' in df.columns:
+                    # Liquidation/Volume ratio - stress indicator
+                    df['liq_volume_ratio'] = df['liq_volume_5m_sum'] / (df['volume'] + 1e-8)
+
+                if 'liq_notional_5m_sum' in df.columns:
+                    # Liquidation intensity per hour
+                    df['liq_intensity'] = df['liq_notional_5m_sum'] / 4.0  # 4h window
+
+                # Statistical Features (Phase 2 completion)
+                if 'funding_rate_last' in df.columns:
+                    # Funding rate volatility
+                    df['funding_vol_24h'] = df['funding_rate_last'].rolling(6).std()  # 6 periods = 24h
+                    df['funding_vol_7d'] = df['funding_rate_last'].rolling(42).std()  # 42 periods = 7d
+
+                    # Funding rate trend
+                    df['funding_trend_24h'] = df['funding_rate_last'].rolling(6).apply(
+                        lambda x: 1 if x.iloc[-1] > x.iloc[0] else -1, raw=False
+                    )
+
+                if 'oi_last' in df.columns:
+                    # OI volatility
+                    df['oi_vol_24h'] = df['oi_last'].pct_change().rolling(6).std()
+                    df['oi_vol_7d'] = df['oi_last'].pct_change().rolling(42).std()
+
+                    # OI autocorrelation (persistence)
+                    df['oi_autocorr'] = df['oi_last'].rolling(12).apply(
+                        lambda x: x.autocorr(), raw=False
+                    )
+
+                if 'liq_count_5m_sum' in df.columns:
+                    # Liquidation clustering
+                    df['liq_cluster_24h'] = df['liq_count_5m_sum'].rolling(6).sum()
+                    df['liq_cluster_7d'] = df['liq_count_5m_sum'].rolling(42).sum()
+
+                    # Liquidation spike detection
+                    liq_mean = df['liq_count_5m_sum'].rolling(24).mean()
+                    liq_std = df['liq_count_5m_sum'].rolling(24).std()
+                    df['liq_spike'] = ((df['liq_count_5m_sum'] - liq_mean) / (liq_std + 1e-8)).clip(-5, 5)
+
+                if 'liq_imbalance_mean' in df.columns:
+                    # Liquidation regime persistence
+                    df['liq_regime_persist'] = df['liq_imbalance_mean'].rolling(6).mean()
+
+                # Cross-derivatives features
+                if 'funding_rate_last' in df.columns and 'liq_imbalance_mean' in df.columns:
+                    # Funding-Liquidation correlation
+                    df['funding_liq_corr'] = df['funding_rate_last'].rolling(12).corr(df['liq_imbalance_mean'])
+
+                if 'oi_change_rate' in df.columns and 'funding_rate_last' in df.columns:
+                    # OI growth with high funding = risky longs building
+                    df['oi_funding_risk'] = df['oi_change_rate'] * df['funding_rate_last']
+
+                # Cross-asset features (BTC dominance interactions)
+                if 'BTCDOM' in df.columns:
+                    # BTC dominance trend
+                    df['btcdom_trend'] = df['BTCDOM'].diff()
+                    df['btcdom_vol'] = df['BTCDOM'].rolling(6).std()
+
+                    # ETH performance vs BTC dominance
+                    if 'returns' in df.columns:
+                        df['eth_vs_btcdom'] = df['returns'] * (-df['btcdom_trend'])  # ETH up when BTC.D down
+
+                    # Funding rate vs BTC dominance
+                    if 'funding_rate_last' in df.columns:
+                        df['funding_vs_btcdom'] = df['funding_rate_last'] * df['btcdom_trend']
+
+                # Price-Derivatives interactions
+                if 'returns' in df.columns:
+                    if 'funding_rate_last' in df.columns:
+                        # Returns-Funding correlation
+                        df['returns_funding_corr'] = df['returns'].rolling(12).corr(df['funding_rate_last'])
+
+                    if 'liq_imbalance_mean' in df.columns:
+                        # Price moves with liquidation direction
+                        df['returns_liq_sync'] = df['returns'] * df['liq_imbalance_mean']
+
+                    if 'oi_change_rate' in df.columns:
+                        # Price-OI divergence (bearish if OI grows but price falls)
+                        df['price_oi_divergence'] = df['returns'] - df['oi_change_rate']
+
+                # Volatility-Derivatives interactions
+                if 'ATR' in df.columns:
+                    if 'liq_cluster_24h' in df.columns:
+                        # Volatility with liquidation clusters
+                        df['vol_liq_stress'] = df['ATR'] * df['liq_cluster_24h']
+
+                    if 'funding_vol_24h' in df.columns:
+                        # Combined volatility measure
+                        df['combined_vol'] = df['ATR'] * df['funding_vol_24h']
+
             except Exception as e:
                 logger.warning(f"⚠️ Error agregando derivatives features: {e}")
 
         # Fill NaN para derivatives features si no se agregaron
-        deriv_cols = ['funding_rate_last', 'funding_rate_ma_10_last', 'funding_rate_std_10_last',
-                     'funding_rate_delta_sum', 'liq_count_5m_sum', 'liq_volume_5m_sum',
-                     'liq_notional_5m_sum', 'liq_long_pct_mean', 'liq_short_pct_mean',
-                     'liq_imbalance_mean', 'oi_last', 'oi_delta_sum', 'oi_delta_pct_mean',
-                     'funding_extreme', 'funding_momentum', 'liq_cascade_risk', 'oi_change_rate']
+        deriv_cols = [
+            # Base derivatives
+            'funding_rate_last', 'funding_rate_ma_10_last', 'funding_rate_std_10_last',
+            'funding_rate_delta_sum', 'liq_count_5m_sum', 'liq_volume_5m_sum',
+            'liq_notional_5m_sum', 'liq_long_pct_mean', 'liq_short_pct_mean',
+            'liq_imbalance_mean', 'oi_last', 'oi_delta_sum', 'oi_delta_pct_mean',
+            # Derived features
+            'funding_extreme', 'funding_momentum', 'liq_cascade_risk', 'oi_change_rate',
+            # Advanced ratios
+            'oi_volume_ratio', 'funding_oi_ratio', 'liq_volume_ratio', 'liq_intensity',
+            # Statistical features
+            'funding_vol_24h', 'funding_vol_7d', 'funding_trend_24h',
+            'oi_vol_24h', 'oi_vol_7d', 'oi_autocorr',
+            'liq_cluster_24h', 'liq_cluster_7d', 'liq_spike', 'liq_regime_persist',
+            # Cross-derivatives
+            'funding_liq_corr', 'oi_funding_risk',
+            # Cross-asset
+            'btcdom_trend', 'btcdom_vol', 'eth_vs_btcdom', 'funding_vs_btcdom',
+            # Price-Derivatives interactions
+            'returns_funding_corr', 'returns_liq_sync', 'price_oi_divergence',
+            # Volatility-Derivatives interactions
+            'vol_liq_stress', 'combined_vol'
+        ]
         for col in deriv_cols:
             if col not in df.columns:
                 df[col] = 0.0
