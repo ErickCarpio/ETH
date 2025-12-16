@@ -12,6 +12,7 @@ data/*
 models/
 logs/
 *.log
+questdb_data/
 
 # --- Archivos de Python generados ---
 __pycache__/
