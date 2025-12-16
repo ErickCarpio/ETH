@@ -363,10 +363,22 @@ class FeatureEngineer:
             else:
                 df[col] = df[col].fillna(0)
 
-        # ===== MICROSTRUCTURE FEATURES REMOVED =====
-        # Phase 1 features (OBI, VPIN, Spread, Depth) removed - no real order book data available
-        # These will be re-implemented when WebSocket + Order Book L2 infrastructure is ready
-        # See: PLAN_ONLY_REAL_DATA.md for implementation roadmap
+        # ===== PHASE 1: MICROSTRUCTURE FEATURES (REAL DATA FROM QUESTDB) =====
+        # Import microstructure integration module
+        try:
+            from features.microstructure.microstructure_integration import (
+                add_microstructure_features,
+                add_microstructure_interactions
+            )
+
+            # Add microstructure features from QuestDB data
+            df = add_microstructure_features(df, microstructure_df)
+
+            logger.info("✅ Microstructure features agregadas (19 features)")
+
+        except Exception as e:
+            logger.warning(f"⚠️ No se pudieron agregar microstructure features: {e}")
+            # Continuar sin microstructure (placeholders serán agregados automáticamente)
 
         # Derivatives Features (Fase 2 - Funding, Liquidations, Open Interest)
         if derivatives_df is not None and not derivatives_df.empty:
@@ -562,8 +574,13 @@ class FeatureEngineer:
         if 'RSI_14' in df.columns and 'volatility_24h' in df.columns:
             df['rsi_vol_interaction'] = (df['RSI_14'] - 50) * df['volatility_24h']
 
-        # 2. MICROSTRUCTURE × PRICE INTERACTIONS - REMOVED (no real order book data)
-        # obi_returns_sync, obi_returns_divergence, vpin_vol_stress, spread_volume_impact removed
+        # 2. MICROSTRUCTURE × PRICE INTERACTIONS (REAL DATA)
+        try:
+            from features.microstructure.microstructure_integration import add_microstructure_interactions
+            df = add_microstructure_interactions(df)
+            logger.info("✅ Microstructure interactions agregadas (12 features)")
+        except Exception as e:
+            logger.warning(f"⚠️ No se pudieron agregar microstructure interactions: {e}")
 
         # 3. DERIVATIVES × PRICE INTERACTIONS
         if 'funding_rate_last' in df.columns and 'returns' in df.columns:
@@ -589,15 +606,15 @@ class FeatureEngineer:
         if 'volatility_6h' in df.columns and 'volatility_72h' in df.columns:
             df['volatility_expansion'] = df['volatility_6h'] / (df['volatility_72h'] + 1e-8)
 
-        # Microstructure ratios - REMOVED (no real order book data)
-        # obi_depth_ratio, spread_vol_ratio removed
+        # Microstructure ratios - Now included in add_microstructure_interactions()
+        # obi_depth_ratio, spread_vol_ratio
 
         # Derivatives ratios
         if 'liq_long_pct_mean' in df.columns and 'liq_short_pct_mean' in df.columns:
             df['liq_long_short_ratio'] = df['liq_long_pct_mean'] / (df['liq_short_pct_mean'] + 1e-8)
 
         # 5. CONDITIONAL FEATURES (If-Then Logic)
-        # extreme_risk_regime, manipulation_signal REMOVED (use VPIN, spread - no real data)
+        # extreme_risk_regime, manipulation_signal - Now included in add_microstructure_interactions()
 
         # High funding + increasing OI = overleveraged longs
         if 'funding_rate_last' in df.columns and 'oi_change_rate' in df.columns:
@@ -611,14 +628,14 @@ class FeatureEngineer:
             price_drop = df['returns'] < -0.02
             df['capitulation_signal'] = (cascade_risk & price_drop).astype(int)
 
-        # resistance_rejection REMOVED (uses OBI - no real order book data)
+        # resistance_rejection - Now included in add_microstructure_interactions()
 
         # 6. POLYNOMIAL FEATURES (Selected Key Features)
         # Square of important features
         if 'returns' in df.columns:
             df['returns_squared_interaction'] = df['returns'] ** 2
 
-        # obi_squared REMOVED (uses OBI - no real order book data)
+        # obi_squared - Now included in add_microstructure_interactions()
 
         if 'funding_rate_last' in df.columns:
             df['funding_squared'] = df['funding_rate_last'] ** 2
