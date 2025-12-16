@@ -380,6 +380,50 @@ class FeatureEngineer:
             logger.warning(f"⚠️ No se pudieron agregar microstructure features: {e}")
             # Continuar sin microstructure (placeholders serán agregados automáticamente)
 
+        # ===== PHASE 4: STATISTICAL FEATURES (ADVANCED ANALYSIS) =====
+        # Advanced statistical analysis: Hurst, Entropy, Kalman, Wavelets
+        try:
+            from features.statistical.hurst_calculator import HurstCalculator
+            from features.statistical.entropy_calculator import EntropyCalculator
+            from features.statistical.kalman_filter import KalmanFeatureExtractor
+            from features.statistical.wavelet_features import WaveletFeatures
+
+            # Hurst Exponent (memory and regime detection)
+            hurst_calc = HurstCalculator()
+            hurst_features = hurst_calc.calculate_all_features(df, price_col='close')
+            for key, value in hurst_features.items():
+                df[key] = value
+
+            # Entropy (complexity and predictability)
+            entropy_calc = EntropyCalculator()
+            entropy_features = entropy_calc.calculate_all_features(df, price_col='close')
+            for key, value in entropy_features.items():
+                df[key] = value
+
+            # Kalman Filter (state estimation and noise reduction)
+            kalman_calc = KalmanFeatureExtractor()
+            kalman_features = kalman_calc.calculate_all_features(df, price_col='close', auto_tune=True)
+            for key, value in kalman_features.items():
+                df[key] = value
+
+            # Wavelets and FFT (frequency analysis)
+            wavelet_calc = WaveletFeatures()
+            wavelet_features = wavelet_calc.calculate_all_features(df, price_col='close')
+            for key, value in wavelet_features.items():
+                df[key] = value
+
+            logger.info("✅ FASE 4 Statistical features agregadas (~100 features)")
+            logger.info(f"  - Hurst: {len(hurst_features)} features")
+            logger.info(f"  - Entropy: {len(entropy_features)} features")
+            logger.info(f"  - Kalman: {len(kalman_features)} features")
+            logger.info(f"  - Wavelet/FFT: {len(wavelet_features)} features")
+
+        except Exception as e:
+            logger.warning(f"⚠️ No se pudieron agregar statistical features (FASE 4): {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
+            # Continuar sin statistical features
+
         # Derivatives Features (Fase 2 - Funding, Liquidations, Open Interest)
         if derivatives_df is not None and not derivatives_df.empty:
             try:
