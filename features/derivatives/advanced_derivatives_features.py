@@ -222,6 +222,103 @@ class AdvancedDerivativesFeatures:
 
         return risk
 
+    def aggregate_liquidations_by_windows(self,
+                                         liquidations: pd.DataFrame,
+                                         windows: List[str] = ['1min', '5min', '15min']) -> Dict:
+        """
+        Agrega liquidaciones en múltiples ventanas de tiempo.
+
+        Args:
+            liquidations: DataFrame con liquidaciones [timestamp, notional, side]
+            windows: Lista de ventanas (ej: ['1min', '5min', '15min'])
+
+        Returns:
+            Dict con agregaciones por ventana
+        """
+        features = {}
+
+        if liquidations.empty or 'timestamp' not in liquidations.columns:
+            for window in windows:
+                features[f'liq_total_{window}'] = 0.0
+                features[f'liq_count_{window}'] = 0
+                features[f'liq_avg_{window}'] = 0.0
+            return features
+
+        # Set timestamp as index
+        liq_df = liquidations.set_index('timestamp')
+
+        for window in windows:
+            # Aggregate by window
+            agg = liq_df.resample(window).agg({
+                'notional': ['sum', 'count', 'mean'],
+            })
+
+            # Get most recent window
+            if not agg.empty:
+                latest = agg.iloc[-1]
+                features[f'liq_total_{window}'] = latest[('notional', 'sum')]
+                features[f'liq_count_{window}'] = int(latest[('notional', 'count')])
+                features[f'liq_avg_{window}'] = latest[('notional', 'mean')]
+            else:
+                features[f'liq_total_{window}'] = 0.0
+                features[f'liq_count_{window}'] = 0
+                features[f'liq_avg_{window}'] = 0.0
+
+        return features
+
+    def calculate_liquidation_ratio(self,
+                                   liquidations: pd.DataFrame) -> Dict:
+        """
+        Calcula ratio de liquidaciones long vs short.
+
+        Args:
+            liquidations: DataFrame con columna 'side' ('long' o 'short')
+
+        Returns:
+            Dict con ratios y métricas
+        """
+        features = {}
+
+        if liquidations.empty or 'side' not in liquidations.columns:
+            return {
+                'liq_long_ratio': 0.5,
+                'liq_short_ratio': 0.5,
+                'liq_long_short_ratio': 1.0,
+                'liq_long_total': 0.0,
+                'liq_short_total': 0.0
+            }
+
+        # Separate by side
+        long_liqs = liquidations[liquidations['side'] == 'long']
+        short_liqs = liquidations[liquidations['side'] == 'short']
+
+        # Calculate totals
+        long_total = long_liqs['notional'].sum() if not long_liqs.empty else 0.0
+        short_total = short_liqs['notional'].sum() if not short_liqs.empty else 0.0
+        total = long_total + short_total
+
+        # Calculate ratios
+        if total > 0:
+            long_ratio = long_total / total
+            short_ratio = short_total / total
+        else:
+            long_ratio = 0.5
+            short_ratio = 0.5
+
+        # Long/Short ratio
+        if short_total > 0:
+            ls_ratio = long_total / short_total
+        else:
+            ls_ratio = 1.0 if long_total == 0 else float('inf')
+
+        features['liq_long_ratio'] = long_ratio
+        features['liq_short_ratio'] = short_ratio
+        features['liq_long_short_ratio'] = min(ls_ratio, 100.0)  # Cap at 100
+        features['liq_long_total'] = long_total
+        features['liq_short_total'] = short_total
+
+        return features
+
     # ===== OPEN INTEREST ADVANCED =====
 
     def calculate_oi_velocity(self,
@@ -385,6 +482,30 @@ class AdvancedDerivativesFeatures:
                 features['liq_cascade_risk'] = self.calculate_cascade_risk(liquidations_df, oi_current, price_current)
             else:
                 features['liq_cascade_risk'] = 0.0
+
+            # Aggregations by windows (1m, 5m, 15m)
+            window_features = self.aggregate_liquidations_by_windows(liquidations_df)
+            features.update(window_features)
+
+            # Long/Short ratio
+            ratio_features = self.calculate_liquidation_ratio(liquidations_df)
+            features.update(ratio_features)
+        else:
+            # Placeholder if no liquidation data
+            features.update({
+                'liq_total_1min': 0.0,
+                'liq_count_1min': 0,
+                'liq_avg_1min': 0.0,
+                'liq_total_5min': 0.0,
+                'liq_count_5min': 0,
+                'liq_avg_5min': 0.0,
+                'liq_total_15min': 0.0,
+                'liq_count_15min': 0,
+                'liq_avg_15min': 0.0,
+                'liq_long_ratio': 0.5,
+                'liq_short_ratio': 0.5,
+                'liq_long_short_ratio': 1.0
+            })
 
         # === OI FEATURES ===
         if not oi_df.empty and 'oi' in oi_df.columns:

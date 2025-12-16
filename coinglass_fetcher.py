@@ -194,14 +194,89 @@ class CoinglassFetcher:
         df.index.name = 'timestamp'
         return df
 
-    def get_derivatives_features(self, symbol: str = "ETH", days: int = 730) -> pd.DataFrame:
+    def calculate_oi_velocity(self, oi_series: pd.Series, window_hours: int = 1) -> pd.Series:
+        """
+        Calculate OI velocity (change per hour).
+
+        Args:
+            oi_series: Open Interest time series
+            window_hours: Window size in hours
+
+        Returns:
+            Series with OI velocity
+        """
+        # Convert window to periods (assuming hourly data)
+        velocity = (oi_series - oi_series.shift(window_hours)) / window_hours
+        return velocity
+
+    def calculate_oi_percentile(self, oi_series: pd.Series, window_days: int = 90) -> pd.Series:
+        """
+        Calculate current OI percentile vs historical distribution.
+
+        Args:
+            oi_series: Open Interest time series
+            window_days: Historical window in days
+
+        Returns:
+            Series with percentile rank (0-1)
+        """
+        def rolling_percentile(x):
+            if len(x) < 2:
+                return 0.5
+            return (x.iloc[-1] > x.iloc[:-1]).sum() / (len(x) - 1)
+
+        percentile = oi_series.rolling(window=window_days, min_periods=2).apply(rolling_percentile, raw=False)
+        return percentile
+
+    def detect_oi_divergence(self,
+                            oi_series: pd.Series,
+                            price_series: pd.Series,
+                            window: int = 24) -> pd.Series:
+        """
+        Detect divergence between OI and price.
+
+        Bullish divergence: OI up, price flat/down
+        Bearish divergence: OI down, price flat/up
+
+        Args:
+            oi_series: Open Interest series
+            price_series: Price series
+            window: Window for trend calculation
+
+        Returns:
+            Series with divergence indicator (-1, 0, 1)
+        """
+        # Calculate trends
+        oi_trend = oi_series.rolling(window).apply(lambda x: 1 if x.iloc[-1] > x.iloc[0] else -1, raw=False)
+        price_trend = price_series.rolling(window).apply(lambda x: 1 if x.iloc[-1] > x.iloc[0] else -1, raw=False)
+
+        # Detect divergences
+        divergence = pd.Series(0, index=oi_series.index)
+
+        # Bullish: OI up, price down
+        divergence[(oi_trend == 1) & (price_trend == -1)] = 1
+
+        # Bearish: OI down, price up
+        divergence[(oi_trend == -1) & (price_trend == 1)] = -1
+
+        return divergence
+
+    def get_derivatives_features(self, symbol: str = "ETH", days: int = 730, price_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
         """
         Retorna features de derivados listas para el modelo
+
+        Args:
+            symbol: Symbol to fetch
+            days: Days of history
+            price_df: Optional price DataFrame for divergence detection
 
         Returns:
             DataFrame con:
             - open_interest_norm (normalizado)
             - oi_change (% change diario)
+            - oi_velocity_1h (change per hour)
+            - oi_percentile_90d (percentile vs 90d history)
+            - oi_divergence (divergence with price)
             - funding_rate (si disponible)
         """
         # Open Interest (siempre, aunque sea simulado)
@@ -222,8 +297,30 @@ class CoinglassFetcher:
         # Normalizar OI (dividir por 1B)
         if 'open_interest' in result.columns:
             result['open_interest_norm'] = result['open_interest'] / 1e9
+
+            # OI Velocity (change per hour)
+            result['oi_velocity_1h'] = self.calculate_oi_velocity(result['open_interest'], window_hours=1)
+
+            # OI Percentile (90-day)
+            result['oi_percentile_90d'] = self.calculate_oi_percentile(result['open_interest'], window_days=90)
+
+            # OI Divergence (if price data available)
+            if price_df is not None and 'close' in price_df.columns:
+                # Align indices
+                aligned_price = price_df['close'].reindex(result.index, method='ffill')
+                result['oi_divergence'] = self.detect_oi_divergence(
+                    result['open_interest'],
+                    aligned_price,
+                    window=24
+                )
+            else:
+                result['oi_divergence'] = 0
+
         else:
             result['open_interest_norm'] = 0.0
+            result['oi_velocity_1h'] = 0.0
+            result['oi_percentile_90d'] = 0.5
+            result['oi_divergence'] = 0
 
         # Fill NaN en funding rate
         if 'funding_rate' not in result.columns:
@@ -232,7 +329,14 @@ class CoinglassFetcher:
             result['funding_rate'] = result['funding_rate'].fillna(0)
 
         # Retornar solo features útiles
-        features = ['open_interest_norm', 'oi_change', 'funding_rate']
+        features = [
+            'open_interest_norm',
+            'oi_change',
+            'oi_velocity_1h',
+            'oi_percentile_90d',
+            'oi_divergence',
+            'funding_rate'
+        ]
         return result[[col for col in features if col in result.columns]].fillna(0)
 
 
