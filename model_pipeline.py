@@ -338,8 +338,20 @@ if __name__ == "__main__":
 
     logger.info(f"   ✓ Muestras válidas: {len(X)} / {len(df_features)}")
 
-    if 'close' in X.columns:
-        X = X.drop(columns=['close'])
+    # Eliminar columnas que no deben usarse como features
+    columns_to_drop = ['close']
+
+    # CRÍTICO: Eliminar columnas forward-looking que causarían look-ahead bias
+    forward_looking_cols = ['tp_pct', 'sl_pct', 'tp_price', 'sl_price', 'reward_risk',
+                           'forward_return', 'forward_max', 'forward_min',
+                           'forward_volatility', 'upside_pct', 'downside_pct']
+
+    for col in forward_looking_cols:
+        if col in X.columns:
+            columns_to_drop.append(col)
+            logger.info(f"   ⚠️ Eliminando columna forward-looking: {col}")
+
+    X = X.drop(columns=[col for col in columns_to_drop if col in X.columns])
 
     logger.info(f"   ✓ Features finales: {X.shape[1]}")
 

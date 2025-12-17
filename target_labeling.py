@@ -522,11 +522,14 @@ def label_regime_targets(df: pd.DataFrame,
         df_labeled = signal_labeler.label_trading_signals(df)
         targets = df_labeled['signal']
 
-        # Guardar TP/SL info en el DataFrame original (opcional)
-        # Esto permite al pipeline acceder a los valores de TP/SL
-        for col in ['tp_pct', 'sl_pct', 'tp_price', 'sl_price', 'reward_risk']:
-            if col in df_labeled.columns:
-                df[col] = df_labeled[col]
+        # IMPORTANTE: NO copiar tp_pct, sl_pct, reward_risk al DataFrame original
+        # Estos valores son calculados con datos futuros (forward-looking)
+        # y causarían look-ahead bias si se usan como features del modelo.
+        #
+        # El flujo correcto es:
+        # 1. Usar estos valores SOLO para etiquetar (LONG/SHORT/NO_TRADE)
+        # 2. Entrenar modelo SIN estas columnas
+        # 3. En producción: Predecir señal → Luego calcular TP/SL con ATR actual
 
     # === REGIME LABELING (LEGACY) ===
     else:
