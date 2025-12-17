@@ -355,17 +355,39 @@ if __name__ == "__main__":
 
     logger.info(f"   ✓ Features finales: {X.shape[1]}")
 
-    # Split temporal (últimas 20% para validación)
-    split_idx = int(len(X) * 0.8)
+    # Verificar distribución de clases
+    class_counts = y.value_counts().sort_index()
+    logger.info(f"   Distribución de clases en datos completos:")
+    for cls, count in class_counts.items():
+        logger.info(f"      Clase {int(cls)}: {count} muestras")
 
-    X_train = X.iloc[:split_idx]
-    X_val = X.iloc[split_idx:]
-    y_train = y.iloc[:split_idx]
-    y_val = y.iloc[split_idx:]
-    w_train = w[:split_idx]
+    # Stratified split (mantiene proporción de clases)
+    # Mejor que split temporal cuando hay pocas señales
+    from sklearn.model_selection import train_test_split
+
+    X_train, X_val, y_train, y_val, w_train, w_val = train_test_split(
+        X, y, w,
+        test_size=0.2,
+        random_state=42,
+        stratify=y  # Mantiene proporción de clases
+    )
 
     logger.info(f"   ✓ Train: {len(X_train)} muestras")
     logger.info(f"   ✓ Val:   {len(X_val)} muestras")
+
+    # Verificar que todas las clases estén en train
+    train_classes = set(y_train.unique())
+    val_classes = set(y_val.unique())
+    all_classes = set(range(n_classes))
+
+    if train_classes != all_classes:
+        missing = all_classes - train_classes
+        logger.warning(f"   ⚠️ Clases faltantes en train: {missing}")
+        logger.warning(f"   ⚠️ Esto puede causar errores - considera generar más señales")
+
+    if val_classes != all_classes:
+        missing = all_classes - val_classes
+        logger.warning(f"   ⚠️ Clases faltantes en val: {missing}")
 
     # 6. Entrenar modelo
     logger.info("\n6. Entrenando modelo...")
