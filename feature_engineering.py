@@ -754,6 +754,59 @@ class FeatureEngineer:
             if col in df.columns:
                 df[col] = df[col].fillna(0)
 
+        # ===== PHASE 6: TSFRESH AUTO-GENERATION (100 features) =====
+        # Automated feature extraction from 7 key time series
+        try:
+            from features.automated import get_tsfresh_features
+
+            # Create target for feature selection (next period price movement)
+            target = df['close'].pct_change().shift(-1)
+            target = (target > 0).astype(int)  # Binary: up (1) or down (0)
+
+            # Key time series for tsfresh extraction
+            tsfresh_columns = [
+                'close',  # Price
+                'volume',  # Volume
+                'OBI_L5',  # Order Book Imbalance
+                'VPIN',  # Volume-synchronized PIN
+                'funding_rate_last',  # Funding rate (renamed from funding_rate)
+                'stablecoin_flow_7d',  # Stablecoin flows
+                'open_interest_norm'  # Open Interest
+            ]
+
+            # Filter to available columns
+            available_tsfresh_cols = [col for col in tsfresh_columns if col in df.columns]
+
+            if len(available_tsfresh_cols) >= 3:  # Need at least 3 time series
+                logger.info(f"Extracting tsfresh features from {len(available_tsfresh_cols)} time series...")
+
+                tsfresh_features = get_tsfresh_features(
+                    df,
+                    target,
+                    columns=available_tsfresh_cols,
+                    n_top=100,  # Select top 100 features
+                    use_cache=True  # Cache for fast reuse
+                )
+
+                if not tsfresh_features.empty:
+                    # Merge tsfresh features
+                    df = df.join(tsfresh_features, how='left')
+                    df = df.fillna(method='ffill').fillna(0)
+
+                    logger.info(f"✅ FASE 6: tsfresh features agregadas ({tsfresh_features.shape[1]} features)")
+                    logger.info(f"  Sample features: {list(tsfresh_features.columns[:5])}")
+                else:
+                    logger.warning("⚠️ tsfresh returned empty features")
+            else:
+                logger.warning(f"⚠️ Only {len(available_tsfresh_cols)} time series available for tsfresh (need 3+)")
+
+        except ImportError:
+            logger.warning("⚠️ tsfresh not available - install with: pip install tsfresh")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not add tsfresh features (FASE 6): {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
+
         df.dropna(inplace=True)
         cols_to_drop = ['open', 'high', 'low', 'close', 'volume']
         self.feature_names = [c for c in df.columns if c not in cols_to_drop]
