@@ -11,6 +11,7 @@ Calculates various entropy measures to quantify:
 Features generated: ~20
 """
 
+import math
 import numpy as np
 import pandas as pd
 from typing import Dict, Optional
@@ -236,7 +237,7 @@ class EntropyCalculator:
 
                 # Normalize if requested
                 if normalize:
-                    max_entropy = np.log2(np.math.factorial(order))
+                    max_entropy = np.log2(math.factorial(order))
                     if max_entropy > 0:
                         pe = pe / max_entropy
 
