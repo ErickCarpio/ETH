@@ -10,7 +10,7 @@ from typing import Dict, List, Tuple
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("L2_Features")
 
-class OrderBookFeatureEngine:
+class OrderBookProcessor:
     def __init__(self):
         pass
 
@@ -106,7 +106,7 @@ class OrderBookFeatureEngine:
 
 # --- PRUEBA UNITARIA ---
 if __name__ == "__main__":
-    engine = OrderBookFeatureEngine()
+    engine = OrderBookProcessor()
     
     # Simular un libro donde:
     # - Tope del libro (L1): Mucha COMPRA (100 vs 10)
