@@ -94,3 +94,51 @@ class TemporalWeighting:
     @staticmethod
     def calibrate_decay_rate(target_half_life_days: int = 180) -> float:
         return -np.log(0.5) / target_half_life_days
+
+
+# ============================================================================
+# WRAPPER FUNCTION FOR COMPATIBILITY
+# ============================================================================
+
+def calculate_sample_weights(df: pd.DataFrame,
+                            method: str = 'time_decay',
+                            half_life_days: int = 30,
+                            **kwargs) -> np.ndarray:
+    """
+    Wrapper function to calculate sample weights compatible with model_pipeline.py
+
+    Args:
+        df: DataFrame with temporal index
+        method: 'time_decay' or 'uniform'
+        half_life_days: Half-life for exponential decay (default 30 days)
+        **kwargs: Additional parameters for TemporalWeighting
+
+    Returns:
+        Array of sample weights
+    """
+    logger.info(f"Calculating sample weights using method: {method}")
+
+    if method == 'uniform':
+        weights = np.ones(len(df))
+        logger.info(f"✓ Uniform weights: {len(weights)} samples")
+    else:  # time_decay
+        # Calibrate decay rate based on half-life
+        decay_rate = TemporalWeighting.calibrate_decay_rate(half_life_days)
+
+        # Initialize weighting system
+        weighter = TemporalWeighting(
+            decay_rate=decay_rate,
+            min_weight=kwargs.get('min_weight', 0.1),
+            max_weight=kwargs.get('max_weight', 1.0),
+            recent_days=kwargs.get('recent_days', 7)
+        )
+
+        # Calculate weights
+        weights = weighter.calculate_weights(df)
+
+        # Statistics
+        stats = weighter.get_weight_statistics(weights)
+        logger.info(f"✓ Time decay weights: {len(weights)} samples")
+        logger.info(f"  Mean: {stats['mean']:.4f}, Range: [{stats['min']:.4f}, {stats['max']:.4f}]")
+
+    return weights

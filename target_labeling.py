@@ -282,3 +282,68 @@ if __name__ == "__main__":
     print("ESTADÍSTICAS POR RÉGIMEN (Método Estático):")
     stats = labeler.get_regime_summary_stats(df_static)
     print(stats.to_string(index=False))
+
+
+# ============================================================================
+# WRAPPER FUNCTION FOR COMPATIBILITY
+# ============================================================================
+
+def label_regime_targets(df: pd.DataFrame,
+                        n_classes: int = 4,
+                        method: str = 'static',
+                        forward_window: int = 3,
+                        **kwargs) -> pd.Series:
+    """
+    Wrapper function to create regime targets compatible with model_pipeline.py
+
+    Args:
+        df: DataFrame with OHLC data (must have 'close', 'high', 'low')
+        n_classes: Number of classes (default 4)
+        method: 'static' or 'adaptive' or 'volatility_quantiles'
+        forward_window: Forward window for target calculation
+        **kwargs: Additional parameters for RegimeLabeler
+
+    Returns:
+        Series with regime labels (0, 1, 2, 3)
+    """
+    logger.info(f"Creating regime targets using method: {method}")
+
+    # Validate required columns
+    required_cols = ['close', 'high', 'low']
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required columns: {missing_cols}")
+
+    # Initialize labeler
+    labeler = RegimeLabeler(
+        forward_window=forward_window,
+        volatility_threshold_low=kwargs.get('volatility_threshold_low', 0.015),
+        volatility_threshold_high=kwargs.get('volatility_threshold_high', 0.05),
+        trend_threshold=kwargs.get('trend_threshold', 0.02)
+    )
+
+    # Apply labeling based on method
+    if method == 'adaptive':
+        df_labeled = labeler.create_adaptive_labels(
+            df,
+            lookback_period=kwargs.get('lookback_period', 168)
+        )
+        targets = df_labeled['regime_adaptive']
+    elif method == 'volatility_quantiles':
+        # Use adaptive method with quantiles (same as adaptive)
+        df_labeled = labeler.create_adaptive_labels(
+            df,
+            lookback_period=kwargs.get('lookback_period', 168)
+        )
+        targets = df_labeled['regime_adaptive']
+    else:  # static
+        df_labeled = labeler.label_regime(df)
+        targets = df_labeled['regime']
+
+    # Align targets with original dataframe index
+    targets = targets.reindex(df.index)
+
+    logger.info(f"✓ Targets created: {len(targets)} samples")
+    logger.info(f"✓ NaN values: {targets.isna().sum()}")
+
+    return targets
