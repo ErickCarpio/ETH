@@ -812,3 +812,74 @@ class FeatureEngineer:
         self.feature_names = [c for c in df.columns if c not in cols_to_drop]
 
         return df
+
+
+# ============================================================================
+# WRAPPER FUNCTION FOR COMPATIBILITY
+# ============================================================================
+
+def generate_features(symbol='ETHUSDT', macro_df=None, onchain_df=None,
+                     sentiment_df=None, microstructure_df=None,
+                     derivatives_df=None, use_cache=True):
+    """
+    Wrapper function to generate all features for a given symbol.
+
+    This function provides a simple interface compatible with model_pipeline.py
+
+    Args:
+        symbol: Trading symbol (default: 'ETHUSDT')
+        macro_df: DataFrame with macro features (optional)
+        onchain_df: DataFrame with on-chain features (optional)
+        sentiment_df: DataFrame with sentiment features (optional)
+        microstructure_df: DataFrame with microstructure features (optional)
+        derivatives_df: DataFrame with derivatives features (optional)
+        use_cache: Whether to use cached data (default: True)
+
+    Returns:
+        DataFrame with all features
+    """
+    import ccxt
+
+    logger.info(f"Generating features for {symbol}...")
+
+    # 1. Download OHLCV data from Binance
+    logger.info("Downloading price data from Binance...")
+    exchange = ccxt.binance()
+
+    # Download 2 years of 4h data
+    timeframe = '4h'
+    limit = 4380  # 2 years ≈ 730 days * 6 (4h candles per day)
+
+    try:
+        ohlcv = exchange.fetch_ohlcv(symbol.replace('USDT', '/USDT'), timeframe, limit=limit)
+
+        crypto_df = pd.DataFrame(
+            ohlcv,
+            columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
+        )
+        crypto_df['timestamp'] = pd.to_datetime(crypto_df['timestamp'], unit='ms')
+        crypto_df.set_index('timestamp', inplace=True)
+
+        logger.info(f"✓ Downloaded {len(crypto_df)} candles ({crypto_df.index[0]} to {crypto_df.index[-1]})")
+
+    except Exception as e:
+        logger.error(f"Error downloading data: {e}")
+        raise
+
+    # 2. Initialize FeatureEngineer
+    engineer = FeatureEngineer()
+
+    # 3. Build features using the class method
+    df_features = engineer.build_full_features(
+        crypto_df=crypto_df,
+        macro_df=macro_df,
+        onchain_df=onchain_df,
+        sentiment_df=sentiment_df,
+        microstructure_df=microstructure_df,
+        derivatives_df=derivatives_df
+    )
+
+    logger.info(f"✓ Generated {df_features.shape[1]} features from {df_features.shape[0]} samples")
+    logger.info(f"  Feature names: {engineer.feature_names[:10]}...")
+
+    return df_features
