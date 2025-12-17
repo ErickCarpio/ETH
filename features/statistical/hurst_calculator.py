@@ -18,9 +18,9 @@ import logging
 try:
     import nolds
     NOLDS_AVAILABLE = True
-except ImportError:
+except (ImportError, TypeError) as e:
     NOLDS_AVAILABLE = False
-    logging.warning("nolds not available - Hurst exponent features will use fallback method")
+    logging.warning(f"nolds not available - Hurst exponent features will use fallback method. Error: {e}")
 
 
 class HurstCalculator:
