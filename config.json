@@ -137,7 +137,7 @@
   "model": {
     "_comment": "Configuración del modelo ML",
     "type": "xgboost",
-    "n_classes": 4,
+    "n_classes": 3,
     "model_dir": "./models",
     "model_path": "./models/xgboost_model.pkl",
 
@@ -146,8 +146,15 @@
     "quick_retrain_trials": 100,
     "retrain_every_days": 7,
 
-    "_comment_target": "Target labeling",
-    "target_method": "fixed_horizon",
+    "_comment_target": "Target labeling - TRADING SIGNALS (LONG/SHORT/NO_TRADE)",
+    "target_method": "trading_signals",
+    "forward_window": 6,
+    "min_reward_risk": 2.0,
+    "min_move_pct": 0.025,
+    "atr_multiplier_sl": 2.0,
+    "atr_multiplier_tp": 4.0,
+
+    "_comment_legacy_regime": "Legacy regime labeling (fixed_horizon, static, adaptive, volatility_quantiles)",
     "target_threshold_pct": 0.005,
     "horizon_hours": 4,
 

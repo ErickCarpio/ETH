@@ -284,29 +284,224 @@ if __name__ == "__main__":
     print(stats.to_string(index=False))
 
 
+class TradingSignalLabeler:
+    """
+    Genera señales de trading enfocadas en oportunidades reales:
+    - Clase 0: LONG (oportunidad alcista con buen R:R)
+    - Clase 1: SHORT (oportunidad bajista con buen R:R)
+    - Clase 2: NO_TRADE (sin señal clara o alta volatilidad)
+
+    Además calcula TP y SL óptimos para cada señal
+    """
+
+    def __init__(self,
+                 forward_window: int = 6,  # 6 velas = 24h forward
+                 min_reward_risk: float = 2.0,  # R:R mínimo 2:1
+                 min_move_pct: float = 0.025,  # Mínimo 2.5% de movimiento
+                 atr_multiplier_sl: float = 2.0,  # SL = ATR * 2
+                 atr_multiplier_tp: float = 4.0):  # TP objetivo = ATR * 4
+        """
+        Args:
+            forward_window: Ventanas hacia adelante para calcular target (6 = 24h)
+            min_reward_risk: Ratio mínimo reward:risk para considerar trade
+            min_move_pct: Movimiento mínimo % para considerar señal
+            atr_multiplier_sl: Multiplicador de ATR para stop loss
+            atr_multiplier_tp: Multiplicador de ATR para take profit objetivo
+        """
+        self.forward_window = forward_window
+        self.min_rr = min_reward_risk
+        self.min_move = min_move_pct
+        self.atr_sl = atr_multiplier_sl
+        self.atr_tp = atr_multiplier_tp
+
+    def calculate_atr(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
+        """Calcula Average True Range"""
+        high = df['high']
+        low = df['low']
+        close = df['close']
+
+        tr1 = high - low
+        tr2 = abs(high - close.shift())
+        tr3 = abs(low - close.shift())
+
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = tr.rolling(period).mean()
+
+        return atr
+
+    def label_trading_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Genera señales de trading con TP/SL
+
+        Args:
+            df: DataFrame con columnas 'close', 'high', 'low'
+
+        Returns:
+            DataFrame con columnas agregadas:
+            - 'signal': 0=LONG, 1=SHORT, 2=NO_TRADE
+            - 'tp_price': Precio de take profit
+            - 'sl_price': Precio de stop loss
+            - 'tp_pct': TP en porcentaje
+            - 'sl_pct': SL en porcentaje
+            - 'reward_risk': Ratio R:R de la señal
+        """
+        df = df.copy()
+
+        # Calcular ATR para stop loss
+        df['atr'] = self.calculate_atr(df)
+
+        # Calcular métricas forward
+        df['forward_return'] = (
+            df['close'].shift(-self.forward_window) / df['close'] - 1
+        )
+
+        # Máximo y mínimo alcanzado en ventana forward
+        df['forward_max'] = (
+            df['high'].rolling(self.forward_window).max().shift(-self.forward_window)
+        )
+        df['forward_min'] = (
+            df['low'].rolling(self.forward_window).min().shift(-self.forward_window)
+        )
+
+        # Calcular upside y downside potencial
+        df['upside_pct'] = (df['forward_max'] / df['close'] - 1)
+        df['downside_pct'] = (df['forward_min'] / df['close'] - 1)
+
+        # Volatilidad forward
+        df['forward_volatility'] = (
+            df['close']
+            .pct_change()
+            .rolling(self.forward_window)
+            .std()
+            .shift(-self.forward_window)
+        )
+
+        # Calcular TP y SL basados en ATR
+        df['atr_pct'] = df['atr'] / df['close']  # ATR normalizado
+
+        # Stop Loss y Take Profit default (basado en ATR)
+        df['sl_pct_default'] = -self.atr_sl * df['atr_pct']  # Negativo (pérdida)
+        df['tp_pct_default'] = self.atr_tp * df['atr_pct']   # Positivo (ganancia)
+
+        # Inicializar señales
+        df['signal'] = 2  # Default: NO_TRADE
+        df['tp_pct'] = 0.0
+        df['sl_pct'] = 0.0
+        df['reward_risk'] = 0.0
+
+        # === SEÑAL LONG ===
+        # Condiciones:
+        # 1. Upside potencial > min_move
+        # 2. Forward return positivo
+        # 3. Volatilidad no extrema
+        # 4. Reward:Risk > min_rr
+
+        long_candidates = (
+            (df['upside_pct'] > self.min_move) &
+            (df['forward_return'] > 0) &
+            (df['forward_volatility'] < 0.08)  # Volatilidad < 8%
+        )
+
+        # Calcular R:R para LONG
+        df.loc[long_candidates, 'tp_pct'] = df.loc[long_candidates, 'upside_pct']
+        df.loc[long_candidates, 'sl_pct'] = df.loc[long_candidates, 'sl_pct_default']
+        df.loc[long_candidates, 'reward_risk'] = (
+            df.loc[long_candidates, 'tp_pct'] /
+            abs(df.loc[long_candidates, 'sl_pct'])
+        )
+
+        # Filtrar por R:R mínimo
+        long_mask = long_candidates & (df['reward_risk'] >= self.min_rr)
+        df.loc[long_mask, 'signal'] = 0
+
+        # === SEÑAL SHORT ===
+        # Condiciones similares pero invertidas
+
+        short_candidates = (
+            (df['downside_pct'] < -self.min_move) &
+            (df['forward_return'] < 0) &
+            (df['forward_volatility'] < 0.08)
+        )
+
+        # Calcular R:R para SHORT
+        df.loc[short_candidates, 'tp_pct'] = df.loc[short_candidates, 'downside_pct']
+        df.loc[short_candidates, 'sl_pct'] = -df.loc[short_candidates, 'sl_pct_default']
+        df.loc[short_candidates, 'reward_risk'] = (
+            abs(df.loc[short_candidates, 'tp_pct']) /
+            abs(df.loc[short_candidates, 'sl_pct'])
+        )
+
+        # Filtrar por R:R mínimo
+        short_mask = short_candidates & (df['reward_risk'] >= self.min_rr)
+        df.loc[short_mask, 'signal'] = 1
+
+        # === CALCULAR PRECIOS ===
+        df['tp_price'] = df['close'] * (1 + df['tp_pct'])
+        df['sl_price'] = df['close'] * (1 + df['sl_pct'])
+
+        # Limpiar registros sin datos forward
+        df.dropna(subset=['forward_return'], inplace=True)
+
+        # Log distribución
+        self._log_signal_distribution(df)
+
+        return df
+
+    def _log_signal_distribution(self, df: pd.DataFrame):
+        """Log de distribución de señales"""
+        counts = df['signal'].value_counts().sort_index()
+        percentages = (counts / len(df) * 100).round(2)
+
+        signal_names = {
+            0: 'LONG',
+            1: 'SHORT',
+            2: 'NO_TRADE'
+        }
+
+        logger.info("=" * 50)
+        logger.info("DISTRIBUCIÓN DE SEÑALES DE TRADING:")
+        for signal_id, count in counts.items():
+            name = signal_names.get(signal_id, f'Unknown-{signal_id}')
+            logger.info(f"  Señal {signal_id} ({name}): {count} ({percentages[signal_id]}%)")
+
+        # Estadísticas de R:R
+        for signal_id in [0, 1]:  # LONG y SHORT
+            if signal_id in counts.index:
+                signal_data = df[df['signal'] == signal_id]
+                avg_rr = signal_data['reward_risk'].mean()
+                avg_tp = signal_data['tp_pct'].mean() * 100
+                avg_sl = signal_data['sl_pct'].mean() * 100
+                logger.info(f"  {signal_names[signal_id]} - Avg R:R: {avg_rr:.2f}, "
+                          f"Avg TP: {avg_tp:.2f}%, Avg SL: {avg_sl:.2f}%")
+
+        logger.info("=" * 50)
+
+
 # ============================================================================
 # WRAPPER FUNCTION FOR COMPATIBILITY
 # ============================================================================
 
 def label_regime_targets(df: pd.DataFrame,
-                        n_classes: int = 4,
-                        method: str = 'static',
-                        forward_window: int = 3,
+                        n_classes: int = 3,
+                        method: str = 'trading_signals',
+                        forward_window: int = 6,
                         **kwargs) -> pd.Series:
     """
-    Wrapper function to create regime targets compatible with model_pipeline.py
+    Wrapper function to create targets compatible with model_pipeline.py
 
     Args:
         df: DataFrame with OHLC data (must have 'close', 'high', 'low')
-        n_classes: Number of classes (default 4)
-        method: 'static' or 'adaptive' or 'volatility_quantiles'
-        forward_window: Forward window for target calculation
-        **kwargs: Additional parameters for RegimeLabeler
+        n_classes: Number of classes (3 for trading_signals, 4 for regime)
+        method: 'trading_signals' (default) or 'static' or 'adaptive' or 'volatility_quantiles'
+        forward_window: Forward window for target calculation (6 = 24h for 4h candles)
+        **kwargs: Additional parameters
 
     Returns:
-        Series with regime labels (0, 1, 2, 3)
+        Series with labels:
+        - trading_signals: 0=LONG, 1=SHORT, 2=NO_TRADE
+        - regime methods: 0=Lateral, 1=Alcista, 2=Bajista, 3=Peligro
     """
-    logger.info(f"Creating regime targets using method: {method}")
+    logger.info(f"Creating targets using method: {method}")
 
     # Validate required columns
     required_cols = ['close', 'high', 'low']
@@ -314,31 +509,49 @@ def label_regime_targets(df: pd.DataFrame,
     if missing_cols:
         raise ValueError(f"Missing required columns: {missing_cols}")
 
-    # Initialize labeler
-    labeler = RegimeLabeler(
-        forward_window=forward_window,
-        volatility_threshold_low=kwargs.get('volatility_threshold_low', 0.015),
-        volatility_threshold_high=kwargs.get('volatility_threshold_high', 0.05),
-        trend_threshold=kwargs.get('trend_threshold', 0.02)
-    )
+    # === NUEVO: TRADING SIGNALS (LONG/SHORT/NO_TRADE) ===
+    if method == 'trading_signals':
+        signal_labeler = TradingSignalLabeler(
+            forward_window=forward_window,
+            min_reward_risk=kwargs.get('min_reward_risk', 2.0),
+            min_move_pct=kwargs.get('min_move_pct', 0.025),
+            atr_multiplier_sl=kwargs.get('atr_multiplier_sl', 2.0),
+            atr_multiplier_tp=kwargs.get('atr_multiplier_tp', 4.0)
+        )
 
-    # Apply labeling based on method
-    if method == 'adaptive':
-        df_labeled = labeler.create_adaptive_labels(
-            df,
-            lookback_period=kwargs.get('lookback_period', 168)
+        df_labeled = signal_labeler.label_trading_signals(df)
+        targets = df_labeled['signal']
+
+        # Guardar TP/SL info en el DataFrame original (opcional)
+        # Esto permite al pipeline acceder a los valores de TP/SL
+        for col in ['tp_pct', 'sl_pct', 'tp_price', 'sl_price', 'reward_risk']:
+            if col in df_labeled.columns:
+                df[col] = df_labeled[col]
+
+    # === REGIME LABELING (LEGACY) ===
+    else:
+        labeler = RegimeLabeler(
+            forward_window=forward_window,
+            volatility_threshold_low=kwargs.get('volatility_threshold_low', 0.015),
+            volatility_threshold_high=kwargs.get('volatility_threshold_high', 0.05),
+            trend_threshold=kwargs.get('trend_threshold', 0.02)
         )
-        targets = df_labeled['regime_adaptive']
-    elif method == 'volatility_quantiles':
-        # Use adaptive method with quantiles (same as adaptive)
-        df_labeled = labeler.create_adaptive_labels(
-            df,
-            lookback_period=kwargs.get('lookback_period', 168)
-        )
-        targets = df_labeled['regime_adaptive']
-    else:  # static
-        df_labeled = labeler.label_regime(df)
-        targets = df_labeled['regime']
+
+        if method == 'adaptive':
+            df_labeled = labeler.create_adaptive_labels(
+                df,
+                lookback_period=kwargs.get('lookback_period', 168)
+            )
+            targets = df_labeled['regime_adaptive']
+        elif method == 'volatility_quantiles':
+            df_labeled = labeler.create_adaptive_labels(
+                df,
+                lookback_period=kwargs.get('lookback_period', 168)
+            )
+            targets = df_labeled['regime_adaptive']
+        else:  # static
+            df_labeled = labeler.label_regime(df)
+            targets = df_labeled['regime']
 
     # Align targets with original dataframe index
     targets = targets.reindex(df.index)

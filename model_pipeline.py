@@ -278,11 +278,21 @@ if __name__ == "__main__":
             prices.set_index('timestamp', inplace=True)
             df_features['close'] = prices['close'].reindex(df_features.index)
 
-        # Crear targets
+        # Crear targets usando método del config
+        target_method = config.get('model', {}).get('target_method', 'trading_signals')
+        target_params = {
+            'forward_window': config.get('model', {}).get('forward_window', 6),
+            'min_reward_risk': config.get('model', {}).get('min_reward_risk', 2.0),
+            'min_move_pct': config.get('model', {}).get('min_move_pct', 0.025),
+            'atr_multiplier_sl': config.get('model', {}).get('atr_multiplier_sl', 2.0),
+            'atr_multiplier_tp': config.get('model', {}).get('atr_multiplier_tp', 4.0),
+        }
+
         targets = label_regime_targets(
             df_features,
             n_classes=n_classes,
-            method='volatility_quantiles'
+            method=target_method,
+            **target_params
         )
 
         logger.info(f"   ✓ Targets creados: {len(targets)}")
