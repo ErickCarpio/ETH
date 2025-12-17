@@ -8,6 +8,7 @@ secrets.json
 data/*
 !data/__init__.py
 !data/managers/
+!data/fetchers/
 !data/storage/
 models/
 logs/
