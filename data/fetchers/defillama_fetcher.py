@@ -73,7 +73,8 @@ class DefiLlamaFetcher:
 
                     # CRITICAL FIX: Usar pd.to_datetime con unit='s' explícito
                     # Esto evita el error "year is out of range" en Windows
-                    ts = pd.to_datetime(date_val, unit='s')
+                    # Forzar a int para evitar FutureWarning
+                    ts = pd.to_datetime(int(date_val), unit='s')
 
                     # Solo últimos N días
                     if ts < datetime.now() - timedelta(days=days):
