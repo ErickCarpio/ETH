@@ -200,8 +200,21 @@ def download_binance_data(symbol='ETHUSDT', timeframe='15m', limit=5000):
 
     logger.info(f"Descargando {limit} velas de {symbol} ({timeframe})...")
 
+    # Calcular milliseconds por vela según timeframe
+    timeframe_ms = {
+        '1m': 60 * 1000,
+        '5m': 5 * 60 * 1000,
+        '15m': 15 * 60 * 1000,
+        '30m': 30 * 60 * 1000,
+        '1h': 60 * 60 * 1000,
+        '4h': 4 * 60 * 60 * 1000,
+        '1d': 24 * 60 * 60 * 1000,
+    }
+
+    candle_ms = timeframe_ms.get(timeframe, 15 * 60 * 1000)  # Default 15min
+
     all_candles = []
-    since = exchange.milliseconds() - (limit * 15 * 60 * 1000)  # Aproximado para 15min
+    since = exchange.milliseconds() - (limit * candle_ms)
 
     while len(all_candles) < limit:
         try:
@@ -295,7 +308,16 @@ def main():
 
     # 4. Crear targets
     logger.info("\n4. Creando targets...")
-    labeler = RegimeLabeler(forward_window=forward_window)
+    # Parámetros ajustados para 15min:
+    # - forward_window: 32 velas = 8h (antes 16 = 4h)
+    # - volatility_threshold_low: 0.01 = 1% (antes 1.5%)
+    # - trend_threshold: 0.012 = 1.2% (antes 2%)
+    labeler = RegimeLabeler(
+        forward_window=32,  # 32 velas × 15min = 8 horas (captura tendencias más largas)
+        volatility_threshold_low=0.010,  # 1% - menos conservador para lateral
+        volatility_threshold_high=0.045,  # 4.5% - umbral para volatilidad extrema
+        trend_threshold=0.012  # 1.2% - más sensible a tendencias en 15min
+    )
 
     # Preparar datos para labeling
     price_df = df_15min[['open', 'high', 'low', 'close']].copy()
