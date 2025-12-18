@@ -264,6 +264,107 @@ def download_binance_data(symbol='ETHUSDT', timeframe='15m', limit=5000):
     return df
 
 
+def download_binance_data_cached(symbol='ETHUSDT', timeframe='1h', limit=5000, cache_manager=None, force_download=False):
+    """
+    Descarga datos de Binance con caché inteligente.
+
+    Args:
+        symbol: Par de trading
+        timeframe: Temporalidad
+        limit: Número de velas
+        cache_manager: Instancia de CacheManager
+        force_download: Si True, ignora cache y descarga todo
+
+    Returns:
+        DataFrame con datos OHLCV
+    """
+    if cache_manager is None:
+        # Sin cache, descargar directamente
+        return download_binance_data(symbol, timeframe, limit)
+
+    cache_key = f"{symbol}_{timeframe}"
+
+    # Si force_download, saltear cache
+    if force_download:
+        logger.info(f"🔄 Forzando descarga completa de {cache_key}...")
+        df = download_binance_data(symbol, timeframe, limit)
+        cache_manager.save_data(cache_key, df)
+        return df
+
+    # Intentar cargar del cache
+    cached_df = cache_manager.load_data(cache_key)
+
+    if cached_df is None or cached_df.empty:
+        # No hay cache, descargar todo
+        logger.info(f"📥 No hay cache para {cache_key}, descargando {limit} velas...")
+        df = download_binance_data(symbol, timeframe, limit)
+        cache_manager.save_data(cache_key, df)
+        return df
+
+    # Hay cache, verificar si necesita actualización
+    last_cached_time = cached_df.index[-1]
+    now = pd.Timestamp.now(tz=last_cached_time.tz)
+
+    # Calcular cuántas velas nuevas podría haber
+    timeframe_ms = {
+        '1m': 60 * 1000,
+        '5m': 5 * 60 * 1000,
+        '15m': 15 * 60 * 1000,
+        '30m': 30 * 60 * 1000,
+        '1h': 60 * 60 * 1000,
+        '4h': 4 * 60 * 60 * 1000,
+        '1d': 24 * 60 * 60 * 1000,
+    }
+
+    candle_ms = timeframe_ms.get(timeframe, 60 * 60 * 1000)
+    time_diff = (now - last_cached_time).total_seconds() * 1000  # milisegundos
+    estimated_new_candles = int(time_diff / candle_ms)
+
+    if estimated_new_candles < 1:
+        # Cache está actualizado
+        logger.info(f"✅ Cache {cache_key} actualizado ({len(cached_df)} velas, última: {last_cached_time})")
+        return cached_df.tail(limit)  # Retornar últimas 'limit' velas
+
+    # Necesita actualización, descargar solo velas nuevas
+    logger.info(f"📥 Actualizando {cache_key}: descargando ~{estimated_new_candles} velas nuevas...")
+
+    try:
+        import ccxt
+        exchange = ccxt.binance({'enableRateLimit': True})
+
+        # Descargar desde última vela + 1
+        since = int(last_cached_time.timestamp() * 1000) + 1
+
+        new_candles = []
+        while True:
+            candles = exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=1000)
+            if not candles:
+                break
+            new_candles.extend(candles)
+            if len(candles) < 1000:
+                break  # No hay más datos
+            since = candles[-1][0] + 1
+
+        if new_candles:
+            df_new = pd.DataFrame(new_candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df_new['timestamp'] = pd.to_datetime(df_new['timestamp'], unit='ms')
+            df_new.set_index('timestamp', inplace=True)
+
+            # Agregar al cache
+            cache_manager.append_data(cache_key, df_new, dedup=True)
+
+            logger.info(f"➕ Agregadas {len(df_new)} velas nuevas a {cache_key}")
+
+        # Recargar cache completo
+        full_df = cache_manager.load_data(cache_key)
+        return full_df.tail(limit)  # Retornar últimas 'limit' velas
+
+    except Exception as e:
+        logger.error(f"❌ Error actualizando cache: {e}")
+        logger.info(f"📂 Usando cache existente ({len(cached_df)} velas)")
+        return cached_df.tail(limit)
+
+
 def main():
     """Pipeline principal de entrenamiento"""
     logger.info("=" * 80)
@@ -305,15 +406,20 @@ def main():
     logger.info(f"   ✓ Forward window: {forward_window}")
     logger.info(f"   ✓ Optuna trials: {optuna_trials}")
 
-    # 2. Descargar datos
+    # 1.5. Inicializar Cache Manager
+    from data.cache.cache_manager import CacheManager
+    cache = CacheManager()
+    logger.info("✓ Cache Manager inicializado")
+
+    # 2. Descargar datos (CON CACHE)
     logger.info("\n2. Descargando datos...")
 
     # 1H para trading (10000 velas ≈ 417 días ≈ 1.1 años)
-    df_1h = download_binance_data(symbol, timeframe='1h', limit=10000)
+    df_1h = download_binance_data_cached(symbol, timeframe='1h', limit=10000, cache_manager=cache)
     logger.info(f"   ✓ Datos 1H: {len(df_1h)} velas ({len(df_1h)/24:.0f} días)")
 
     # 1D para contexto macro (730 velas = 2 años)
-    df_1d = download_binance_data(symbol, timeframe='1d', limit=730)
+    df_1d = download_binance_data_cached(symbol, timeframe='1d', limit=730, cache_manager=cache)
     logger.info(f"   ✓ Datos 1D: {len(df_1d)} velas ({len(df_1d)/365:.1f} años)")
 
     # SENTIMENT (NewsAPI + CryptoPanic)
