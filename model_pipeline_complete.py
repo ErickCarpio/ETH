@@ -94,7 +94,7 @@ class XGBoostRegimeModel:
                 'gamma': trial.suggest_float('gamma', 0, 10),
                 'reg_alpha': trial.suggest_float('reg_alpha', 1e-8, 20.0, log=True),
                 'reg_lambda': trial.suggest_float('reg_lambda', 1e-8, 20.0, log=True),
-            }
+            })
 
             tscv = TimeSeriesSplit(n_splits=n_splits)
             scores = []
