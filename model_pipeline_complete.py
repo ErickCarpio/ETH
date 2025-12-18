@@ -316,15 +316,84 @@ def main():
     df_1d = download_binance_data(symbol, timeframe='1d', limit=730)
     logger.info(f"   ✓ Datos 1D: {len(df_1d)} velas ({len(df_1d)/365:.1f} años)")
 
+    # SENTIMENT (NewsAPI + CryptoPanic)
+    sentiment_df = None
+    if config.get('external_apis', {}).get('newsapi', {}).get('enabled'):
+        try:
+            logger.info("\n   📰 Descargando Sentiment (NewsAPI + CryptoPanic)...")
+            from data.fetchers.sentiment_fetcher import SentimentFetcher
+
+            news_key = config.get('external_apis', {}).get('newsapi', {}).get('api_key')
+            panic_key = config.get('external_apis', {}).get('cryptopanic', {}).get('api_key')
+
+            fetcher = SentimentFetcher(news_api_key=news_key, cryptopanic_key=panic_key)
+            sentiment_df = fetcher.get_aggregated_sentiment(
+                keywords=['ethereum', 'ETH'],
+                lookback_days=int(len(df_1h)/24)  # Días equivalentes a datos 1H
+            )
+            if sentiment_df is not None and not sentiment_df.empty:
+                logger.info(f"   ✓ Sentiment: {len(sentiment_df)} registros")
+            else:
+                logger.warning("   ⚠️ Sentiment vacío")
+                sentiment_df = None
+        except Exception as e:
+            logger.warning(f"   ⚠️ Error descargando sentiment: {e}")
+            sentiment_df = None
+
+    # DEFILLAMA (Stablecoins, TVL)
+    defillama_df = None
+    if config.get('external_apis', {}).get('defillama', {}).get('enabled'):
+        try:
+            logger.info("\n   💰 Descargando DefiLlama (Stablecoins + TVL)...")
+            from data.fetchers.defillama_fetcher import DefiLlamaFetcher
+
+            fetcher = DefiLlamaFetcher()
+            defillama_df = fetcher.get_stablecoin_features(days=int(len(df_1h)/24))
+
+            if defillama_df is not None and not defillama_df.empty:
+                logger.info(f"   ✓ DefiLlama: {len(defillama_df)} registros")
+            else:
+                logger.warning("   ⚠️ DefiLlama vacío")
+                defillama_df = None
+        except Exception as e:
+            logger.warning(f"   ⚠️ Error descargando DefiLlama: {e}")
+            defillama_df = None
+
+    # COINGLASS (Funding, OI, Liquidations)
+    coinglass_df = None
+    if config.get('external_apis', {}).get('coinglass', {}).get('enabled'):
+        try:
+            logger.info("\n   📊 Descargando Coinglass (Derivados)...")
+            from data.fetchers.coinglass_fetcher import CoinglassFetcher
+
+            cg_key = config.get('external_apis', {}).get('coinglass', {}).get('api_key')
+            fetcher = CoinglassFetcher(api_key=cg_key)
+            coinglass_df = fetcher.get_derivatives_features(
+                symbol='ETH',
+                days=int(len(df_1h)/24)
+            )
+
+            if coinglass_df is not None and not coinglass_df.empty:
+                logger.info(f"   ✓ Coinglass: {len(coinglass_df)} registros")
+            else:
+                logger.warning("   ⚠️ Coinglass vacío")
+                coinglass_df = None
+        except Exception as e:
+            logger.warning(f"   ⚠️ Error descargando Coinglass: {e}")
+            coinglass_df = None
+
     # 3. Generar features
     logger.info("\n3. Generando features...")
     fe = FeatureEngineer()
 
-    # Features de 1H + features macro de 1D
+    # Features COMPLETAS: precio 1H + macro 1D + sentiment + defillama + coinglass
     features_df = fe.build_full_features(
         crypto_df=df_1h,
         macro_df=None,  # Si tienes BTCDOM, pásalo aquí
-        crypto_4h_df=df_1d  # Contexto macro (usa param crypto_4h_df pero con datos 1D)
+        crypto_4h_df=df_1d,  # Contexto macro (usa param crypto_4h_df pero con datos 1D)
+        sentiment_df=sentiment_df,  # Sentiment de noticias
+        defillama_df=defillama_df,  # Stablecoins + TVL
+        coinglass_df=coinglass_df   # Derivados (funding, OI, liquidations)
     )
 
     logger.info(f"   ✓ Features generadas: {features_df.shape}")
