@@ -58,32 +58,44 @@
   },
 
   "external_apis": {
-    "_comment": "APIs externas",
+    "_comment": "APIs externas - TODAS ACTIVADAS",
 
     "cryptopanic": {
       "enabled": true,
-      "api_key": "dd3ec2c5ee8e75423c11ff8eb84c9f2726953af4"
+      "api_key": "dd3ec2c5ee8e75423c11ff8eb84c9f2726953af4",
+      "_comment": "Sentiment de noticias crypto"
     },
 
     "newsapi": {
       "enabled": true,
-      "api_key": "f27d99d4600645eb860ef7f4f1a631ba"
+      "api_key": "f27d99d4600645eb860ef7f4f1a631ba",
+      "_comment": "Noticias mainstream para sentiment"
     },
 
     "coinglass": {
       "enabled": true,
       "api_key": "e8edff3d5f0c40a3af7cd836600c725b",
-      "_comment": "Datos reales de derivados (OI, Funding)"
+      "_comment": "Datos reales de derivados (OI, Funding, Liquidations)"
     },
 
     "deribit": {
       "enabled": true,
-      "_comment": "API pública (no requiere key para GEX)"
+      "_comment": "API pública (GEX - Gamma Exposure)"
     },
 
     "defillama": {
       "enabled": true,
-      "_comment": "API pública (TVL DeFi)"
+      "_comment": "API pública (TVL DeFi, Stablecoin dominance)"
+    },
+
+    "cryptoquant": {
+      "enabled": false,
+      "_comment": "Requiere API key adicional (on-chain: exchange flows, etc)"
+    },
+
+    "glassnode": {
+      "enabled": false,
+      "_comment": "Requiere API key adicional (on-chain: whale movements, etc)"
     },
 
     "use_simulated_data": false
