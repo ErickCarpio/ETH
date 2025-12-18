@@ -12,7 +12,7 @@ import logging
 import sys
 
 # Imports de módulos locales
-from data_manager import DataManager
+from data.managers.data_manager import DataManager
 from weighting_logic import TemporalWeighting
 from feature_engineering import FeatureEngineer
 from target_labeling import RegimeLabeler

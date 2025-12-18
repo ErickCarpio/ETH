@@ -128,7 +128,7 @@ class DataManager:
                     logger.info("⚡ Descargando datos On-Chain...")
                     try:
                         # Lazy import: solo importar cuando realmente se necesita
-                        from onchain_data_fetcher import OnChainDataFetcher
+                        from data.fetchers.onchain_data_fetcher import OnChainDataFetcher
 
                         # Extraer API keys de on-chain
                         onchain_keys = {}
@@ -170,7 +170,7 @@ class DataManager:
                     logger.info("🧠 Analizando sentimiento con FinBERT...")
                     try:
                         # Lazy import: solo importar cuando realmente se necesita
-                        from sentiment_fetcher import SentimentFetcher
+                        from data.fetchers.sentiment_fetcher import SentimentFetcher
 
                         # Extraer API keys de sentiment
                         news_key = None
@@ -215,7 +215,7 @@ class DataManager:
                     logger.info("💰 Descargando datos de Stablecoins (DefiLlama)...")
                     try:
                         # Lazy import
-                        from defillama_fetcher import DefiLlamaFetcher
+                        from data.fetchers.defillama_fetcher import DefiLlamaFetcher
 
                         fetcher = DefiLlamaFetcher()
 
@@ -246,7 +246,7 @@ class DataManager:
                     logger.info("📈 Descargando datos de Derivados (Coinglass)...")
                     try:
                         # Lazy import
-                        from coinglass_fetcher import CoinglassFetcher
+                        from data.fetchers.coinglass_fetcher import CoinglassFetcher
 
                         # Extraer API key si existe
                         coinglass_key = None

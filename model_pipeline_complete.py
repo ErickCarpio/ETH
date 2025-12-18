@@ -22,8 +22,7 @@ import sys
 # Imports locales
 from feature_engineering import FeatureEngineer
 from target_labeling import RegimeLabeler
-from weighting_logic import calculate_sample_weights
-from config_loader import load_config
+from weighting_logic import TemporalWeighting
 
 logging.basicConfig(
     level=logging.INFO,
@@ -237,9 +236,16 @@ def main():
     # 1. Cargar configuración
     logger.info("\n1. Cargando configuración...")
     try:
-        config = load_config()
+        # Intentar cargar config_15min.json
+        config_path = Path('config_15min.json')
+        if config_path.exists():
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+            logger.info("✓ Configuración cargada desde config_15min.json")
+        else:
+            raise FileNotFoundError("config_15min.json no encontrado")
     except:
-        logger.warning("No se pudo cargar config.json, usando valores por defecto")
+        logger.warning("No se pudo cargar config_15min.json, usando valores por defecto")
         config = {
             'exchange': {'symbol': 'ETHUSDT'},
             'data': {'timeframe': '15m'},
@@ -310,12 +316,16 @@ def main():
     # 5. Calcular pesos de muestras
     logger.info("\n5. Calculando pesos de muestras...")
     try:
-        sample_weights = calculate_sample_weights(
-            features_df,
-            method='time_decay',
-            halflife_days=30
+        # Usar TemporalWeighting para calcular pesos
+        weighting = TemporalWeighting(
+            decay_rate=0.001,
+            min_weight=0.1,
+            max_weight=1.0,
+            recent_days=7
         )
-    except:
+        sample_weights = weighting.calculate_weights(features_df)
+    except Exception as e:
+        logger.warning(f"Error calculando pesos: {e}")
         # Fallback simple
         sample_weights = np.ones(len(features_df))
         decay_factor = np.linspace(0.1, 1.0, len(sample_weights))
