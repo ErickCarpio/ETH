@@ -243,7 +243,7 @@ def download_binance_data(symbol='ETHUSDT', timeframe='15m', limit=5000):
 def main():
     """Pipeline principal de entrenamiento"""
     logger.info("=" * 80)
-    logger.info("INICIANDO PIPELINE DE ENTRENAMIENTO - 15MIN + 4H MACRO")
+    logger.info("INICIANDO PIPELINE DE ENTRENAMIENTO - 1H + 1D MACRO")
     logger.info("=" * 80)
 
     # 1. Cargar configuración
@@ -284,23 +284,23 @@ def main():
     # 2. Descargar datos
     logger.info("\n2. Descargando datos...")
 
-    # 15MIN para trading
-    df_15min = download_binance_data(symbol, timeframe='15m', limit=5000)
-    logger.info(f"   ✓ Datos 15min: {len(df_15min)} velas")
+    # 1H para trading (10000 velas ≈ 417 días ≈ 1.1 años)
+    df_1h = download_binance_data(symbol, timeframe='1h', limit=10000)
+    logger.info(f"   ✓ Datos 1H: {len(df_1h)} velas ({len(df_1h)/24:.0f} días)")
 
-    # 4H para contexto macro
-    df_4h = download_binance_data(symbol, timeframe='4h', limit=1000)
-    logger.info(f"   ✓ Datos 4H: {len(df_4h)} velas")
+    # 1D para contexto macro (730 velas = 2 años)
+    df_1d = download_binance_data(symbol, timeframe='1d', limit=730)
+    logger.info(f"   ✓ Datos 1D: {len(df_1d)} velas ({len(df_1d)/365:.1f} años)")
 
     # 3. Generar features
     logger.info("\n3. Generando features...")
     fe = FeatureEngineer()
 
-    # Features de 15min + features macro de 4H
+    # Features de 1H + features macro de 1D
     features_df = fe.build_full_features(
-        crypto_df=df_15min,
+        crypto_df=df_1h,
         macro_df=None,  # Si tienes BTCDOM, pásalo aquí
-        crypto_4h_df=df_4h  # Contexto macro
+        crypto_4h_df=df_1d  # Contexto macro (usa param crypto_4h_df pero con datos 1D)
     )
 
     logger.info(f"   ✓ Features generadas: {features_df.shape}")
@@ -310,20 +310,20 @@ def main():
     logger.info("\n4. Creando targets...")
     # ESTRATEGIA: CALIDAD sobre CANTIDAD
     # Capturar MENOS señales pero REALES (no ruido)
-    # - forward_window: 48 velas = 12h (tendencias significativas)
+    # - forward_window: 12 velas × 1H = 12h (tendencias significativas)
     # - trend_threshold: 2.5% (movimientos grandes y claros)
     # - volatility_threshold_low: 0.018 (1.8% - muy selectivo)
     #
     # Objetivo: 70-75% NO_TRADE, pero cuando dice LONG/SHORT que sea CONFIABLE
     labeler = RegimeLabeler(
-        forward_window=48,  # 48 velas × 15min = 12 horas (tendencias claras)
+        forward_window=12,  # 12 velas × 1H = 12 horas (tendencias claras y reales)
         volatility_threshold_low=0.018,  # 1.8% - MUY selectivo para lateral
         volatility_threshold_high=0.055,  # 5.5% - umbral para volatilidad extrema
         trend_threshold=0.025  # 2.5% - solo movimientos SIGNIFICATIVOS en 12h
     )
 
     # Preparar datos para labeling
-    price_df = df_15min[['open', 'high', 'low', 'close']].copy()
+    price_df = df_1h[['open', 'high', 'low', 'close']].copy()
     labeled_df = labeler.label_regime(price_df)
 
     # Alinear targets con features
