@@ -21,14 +21,16 @@ class RegimeLabeler:
     - Clase 3: Peligro (Volatilidad extrema)
     """
     
-    def __init__(self, 
-                 forward_window: int = 3,  # 3 velas de 4h = 12h forward
+    def __init__(self,
+                 forward_window: int = 16,  # 16 velas de 15min = 4h forward (ajustar según estrategia)
                  volatility_threshold_low: float = 0.015,
                  volatility_threshold_high: float = 0.05,
                  trend_threshold: float = 0.02):
         """
         Args:
             forward_window: Ventanas hacia adelante para calcular target
+                           - 15min: 16 velas = 4h, 32 velas = 8h, 48 velas = 12h
+                           - 4h: 3 velas = 12h
             volatility_threshold_low: Umbral para mercado lateral
             volatility_threshold_high: Umbral para mercado peligroso
             trend_threshold: Mínimo cambio % para considerar tendencia
@@ -228,7 +230,7 @@ class RegimeLabeler:
 if __name__ == "__main__":
     # Crear datos sintéticos de mercado
     np.random.seed(42)
-    dates = pd.date_range(end=pd.Timestamp.now(), periods=2000, freq='4H')
+    dates = pd.date_range(end=pd.Timestamp.now(), periods=2000, freq='15min')
     
     # Simular diferentes regímenes
     price = 2000
@@ -256,7 +258,7 @@ if __name__ == "__main__":
     
     # Etiquetar regímenes
     labeler = RegimeLabeler(
-        forward_window=3,
+        forward_window=16,  # 16 velas de 15min = 4 horas
         volatility_threshold_low=0.015,
         volatility_threshold_high=0.05,
         trend_threshold=0.02

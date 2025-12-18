@@ -153,6 +153,7 @@ class TradingSystemOrchestrator:
         features_df = self.feature_engineer.build_full_features(
             crypto_df=dataset['crypto'],
             macro_df=dataset['macro'],
+            crypto_4h_df=dataset.get('crypto_4h'),  # Features macro de 4H
             onchain_df=dataset.get('onchain'),
             sentiment_df=dataset.get('sentiment'),
             defillama_df=dataset.get('defillama'),
@@ -195,9 +196,13 @@ class TradingSystemOrchestrator:
             
             # 2. Re-construir features
             logger.info("\n2. Re-construyendo features...")
+            # Cargar crypto_4h desde caché para features macro
+            crypto_4h_updated = self.data_manager._load_from_cache("prices_4h")
+
             features_df = self.feature_engineer.build_full_features(
                 crypto_df=crypto_updated,
-                macro_df=macro_updated
+                macro_df=macro_updated,
+                crypto_4h_df=crypto_4h_updated
             )
             
             # 3. Re-etiquetar régimen

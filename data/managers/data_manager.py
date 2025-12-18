@@ -59,46 +59,66 @@ class DataManager:
             # CSV de respaldo para inspección manual
             df.to_csv(str(file_path).replace('.parquet', '.csv'))
 
-    async def _fetch_symbol_data(self, symbol):
+    async def _fetch_symbol_data(self, symbol, timeframe='15m', max_candles=5000):
+        """
+        Descarga datos OHLCV para un símbolo
+
+        Args:
+            symbol: Par de trading (ej: 'ETH/USDT')
+            timeframe: Timeframe de velas ('15m', '4h', etc)
+            max_candles: Número máximo de velas a descargar
+        """
         if self.exchange is None: await self.initialize_exchange(testnet=False)
         end_ts = int(datetime.now().timestamp() * 1000)
         start_ts = int((datetime.now() - timedelta(days=self.window_days)).timestamp() * 1000)
-        
-        logger.info(f"⬇️ Descargando {symbol}...")
+
+        logger.info(f"⬇️ Descargando {symbol} ({timeframe})...")
         all_candles = []
         current_ts = start_ts
-        while current_ts < end_ts:
+        while current_ts < end_ts and len(all_candles) < max_candles:
             try:
-                candles = await self.exchange.fetch_ohlcv(symbol, '4h', since=current_ts, limit=1000)
+                candles = await self.exchange.fetch_ohlcv(symbol, timeframe, since=current_ts, limit=1000)
                 if not candles: break
                 all_candles.extend(candles)
                 current_ts = candles[-1][0] + 1
-                await asyncio.sleep(0.05) 
+                await asyncio.sleep(0.05)
             except Exception: break
-        
+
         if not all_candles: return pd.DataFrame()
         df = pd.DataFrame(all_candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
+
+        # Limitar a max_candles más recientes
+        if len(df) > max_candles:
+            df = df.iloc[-max_candles:]
+
+        logger.info(f"✓ Descargado {len(df)} velas de {timeframe}")
         return df
 
     async def get_full_dataset(self, include_onchain=False, include_sentiment=False, api_keys=None):
         try:
-            # 1. Crypto
-            crypto = self._load_from_cache("prices")
+            # 1. Crypto - 15min para trading (5000 velas = ~52 días)
+            crypto = self._load_from_cache("prices_15m")
             if crypto.empty:
-                crypto = await self._fetch_symbol_data(self.symbol)
-                self._save_to_cache(crypto, "prices")
+                crypto = await self._fetch_symbol_data(self.symbol, timeframe='15m', max_candles=5000)
+                self._save_to_cache(crypto, "prices_15m")
 
-            # 2. Macro (BTCDOM)
+            # 2. Crypto - 4H para features macro (1000 velas = ~166 días)
+            crypto_4h = self._load_from_cache("prices_4h")
+            if crypto_4h.empty:
+                crypto_4h = await self._fetch_symbol_data(self.symbol, timeframe='4h', max_candles=1000)
+                self._save_to_cache(crypto_4h, "prices_4h")
+
+            # 3. Macro (BTCDOM) - 4H
             macro = self._load_from_cache("macro")
             if macro.empty:
-                btcdom = await self._fetch_symbol_data("BTCDOM/USDT")
+                btcdom = await self._fetch_symbol_data("BTCDOM/USDT", timeframe='4h', max_candles=1000)
                 if not btcdom.empty:
                     macro = pd.DataFrame({'BTCDOM': btcdom['close']})
                     self._save_to_cache(macro, "macro")
 
-            result = {'crypto': crypto, 'macro': macro}
+            result = {'crypto': crypto, 'crypto_4h': crypto_4h, 'macro': macro}
 
             # 3. On-Chain Data (Descarga real si no hay caché)
             if include_onchain:
@@ -262,16 +282,20 @@ class DataManager:
 
     async def update_daily(self, existing_df):
         """Actualiza precios y macro en caché y retorna los precios nuevos"""
-        # 1. Actualizar Precios
-        new_crypto = await self._fetch_symbol_data(self.symbol)
-        self._save_to_cache(new_crypto, "prices")
-        
-        # 2. Actualizar Macro (Silencioso)
-        btcdom = await self._fetch_symbol_data("BTCDOM/USDT")
+        # 1. Actualizar Precios 15min
+        new_crypto = await self._fetch_symbol_data(self.symbol, timeframe='15m', max_candles=5000)
+        self._save_to_cache(new_crypto, "prices_15m")
+
+        # 2. Actualizar Precios 4H
+        new_crypto_4h = await self._fetch_symbol_data(self.symbol, timeframe='4h', max_candles=1000)
+        self._save_to_cache(new_crypto_4h, "prices_4h")
+
+        # 3. Actualizar Macro (Silencioso)
+        btcdom = await self._fetch_symbol_data("BTCDOM/USDT", timeframe='4h', max_candles=1000)
         if not btcdom.empty:
             macro = pd.DataFrame({'BTCDOM': btcdom['close']})
             self._save_to_cache(macro, "macro")
-            
+
         return new_crypto
 
     def fetch_macro_data(self):
