@@ -1,6 +1,6 @@
 """
 Feature Engineering - Construcción de Features
-ACTUALIZADO: Soporte para 15min (trading) + 4H (macro contexto)
+ACTUALIZADO: Soporte para 15min (trading) + 4H (macro contexto) + Statistical Features
 """
 import pandas as pd
 import numpy as np
@@ -10,8 +10,21 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class FeatureEngineer:
-    def __init__(self):
+    def __init__(self, config: dict = None):
         self.feature_names = []
+        self.config = config if config is not None else {}
+
+        # Inicializar Statistical Feature Engine si está habilitado
+        self.statistical_engine = None
+        if self.config.get('features', {}).get('use_statistical', False):
+            try:
+                from features.statistical.statistical_features import StatisticalFeatureEngine
+                stat_config = self.config.get('features', {}).get('statistical', {})
+                self.statistical_engine = StatisticalFeatureEngine(stat_config)
+                logger.info("✅ Statistical Feature Engine activado")
+            except Exception as e:
+                logger.warning(f"⚠️ No se pudo inicializar Statistical Features: {e}")
+                self.statistical_engine = None
 
     def create_technical_features(self, df: pd.DataFrame, timeframe='15m') -> pd.DataFrame:
         """
@@ -221,6 +234,24 @@ class FeatureEngineer:
                 df[col] = 0.0
             else:
                 df[col] = df[col].fillna(0)
+
+        # STATISTICAL FEATURES (Hurst, Kalman, Wavelet, FFT, Entropy, Fractal)
+        if self.statistical_engine is not None:
+            logger.info("🔬 Calculando Statistical Features (~100 features)...")
+            try:
+                # Necesitamos columna 'close' para statistical features
+                if 'close' in crypto_df.columns:
+                    df_with_close = df.copy()
+                    df_with_close['close'] = crypto_df['close']
+
+                    # Calcular statistical features
+                    df = self.statistical_engine.compute_all_features(df_with_close, price_col='close')
+
+                    logger.info("✅ Statistical Features agregadas exitosamente")
+                else:
+                    logger.warning("⚠️ Columna 'close' no encontrada, saltando statistical features")
+            except Exception as e:
+                logger.error(f"❌ Error calculando Statistical Features: {e}")
 
         df.dropna(inplace=True)
         cols_to_drop = ['open', 'high', 'low', 'close', 'volume']

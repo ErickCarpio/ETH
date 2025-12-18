@@ -327,9 +327,8 @@ def main():
             panic_key = config.get('external_apis', {}).get('cryptopanic', {}).get('api_key')
 
             fetcher = SentimentFetcher(news_api_key=news_key, cryptopanic_key=panic_key)
-            sentiment_df = fetcher.get_aggregated_sentiment(
-                keywords=['ethereum', 'ETH'],
-                lookback_days=int(len(df_1h)/24)  # Días equivalentes a datos 1H
+            sentiment_df = fetcher.get_sentiment_dataset(
+                days=int(len(df_1h)/24)  # Días equivalentes a datos 1H
             )
             if sentiment_df is not None and not sentiment_df.empty:
                 logger.info(f"   ✓ Sentiment: {len(sentiment_df)} registros")
@@ -384,7 +383,7 @@ def main():
 
     # 3. Generar features
     logger.info("\n3. Generando features...")
-    fe = FeatureEngineer()
+    fe = FeatureEngineer(config=config)
 
     # Features COMPLETAS: precio 1H + macro 1D + sentiment + defillama + coinglass
     features_df = fe.build_full_features(
