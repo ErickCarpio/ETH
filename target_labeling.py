@@ -14,26 +14,29 @@ logger = logging.getLogger(__name__)
 
 class RegimeLabeler:
     """
-    Clasifica régimen de mercado en 4 categorías:
-    - Clase 0: Rango/Lateral (Low Volatility)
-    - Clase 1: Tendencia Alcista
-    - Clase 2: Tendencia Bajista
-    - Clase 3: Peligro (Volatilidad extrema)
+    Clasificación BINARIA de OPORTUNIDADES de trading:
+    - Clase 0: SHORT (Tendencia Bajista CLARA)
+    - Clase 1: LONG (Tendencia Alcista CLARA)
+
+    IMPORTANTE: Solo etiqueta cuando hay oportunidad REAL.
+    Descarta velas laterales/inciertas del training.
+
+    El modelo aprende a distinguir LONG vs SHORT,
+    y solo da señal cuando encuentra patrón similar.
     """
-    
+
     def __init__(self,
-                 forward_window: int = 16,  # 16 velas de 15min = 4h forward (ajustar según estrategia)
+                 forward_window: int = 12,  # 12 velas de 1H = 12h forward
                  volatility_threshold_low: float = 0.015,
                  volatility_threshold_high: float = 0.05,
-                 trend_threshold: float = 0.02):
+                 trend_threshold: float = 0.025):
         """
         Args:
             forward_window: Ventanas hacia adelante para calcular target
-                           - 15min: 16 velas = 4h, 32 velas = 8h, 48 velas = 12h
-                           - 4h: 3 velas = 12h
-            volatility_threshold_low: Umbral para mercado lateral
-            volatility_threshold_high: Umbral para mercado peligroso
-            trend_threshold: Mínimo cambio % para considerar tendencia
+                           - 1H: 12 velas = 12h, 24 velas = 1 día
+            volatility_threshold_low: Mínimo de volatilidad para considerar (no usado en binario)
+            volatility_threshold_high: Máximo de volatilidad (descarta extremos)
+            trend_threshold: Mínimo cambio % para considerar tendencia CLARA
         """
         self.forward_window = forward_window
         self.vol_low = volatility_threshold_low
@@ -42,21 +45,24 @@ class RegimeLabeler:
     
     def label_regime(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Asigna etiquetas de régimen basadas en comportamiento futuro
-        
+        Etiqueta SOLO oportunidades CLARAS de trading (LONG o SHORT)
+        Descarta velas laterales/inciertas
+
         Args:
             df: DataFrame con columnas 'close', 'high', 'low'
-        
+
         Returns:
-            DataFrame con columna 'regime' agregada
+            DataFrame con columna 'regime' (solo velas con oportunidad clara)
+            - regime=1: LONG (oportunidad alcista)
+            - regime=0: SHORT (oportunidad bajista)
         """
         df = df.copy()
-        
+
         # Calcular forward returns y volatilidad
         df['forward_return'] = (
             df['close'].shift(-self.forward_window) / df['close'] - 1
         )
-        
+
         # Volatilidad forward (desviación std de returns en ventana)
         df['forward_volatility'] = (
             df['close']
@@ -65,57 +71,57 @@ class RegimeLabeler:
             .rolling(self.forward_window)
             .std()
         )
-        
+
         # Rango High-Low normalizado (forward)
         df['forward_hl_range'] = (
-            (df['high'].shift(-self.forward_window) - 
-             df['low'].shift(-self.forward_window)) / 
+            (df['high'].shift(-self.forward_window) -
+             df['low'].shift(-self.forward_window)) /
             df['close']
         )
-        
-        # Inicializar regime
-        df['regime'] = -1  # Default: no clasificado
-        
-        # Clase 3: PELIGRO (Volatilidad Extrema)
-        danger_mask = (
-            (df['forward_volatility'] > self.vol_high) |
-            (df['forward_hl_range'] > self.vol_high * 2)
-        )
-        df.loc[danger_mask, 'regime'] = 3
-        
-        # Clase 0: LATERAL (Baja Volatilidad)
-        lateral_mask = (
-            (df['regime'] == -1) &
-            (df['forward_volatility'] < self.vol_low) &
-            (np.abs(df['forward_return']) < self.trend_threshold)
-        )
-        df.loc[lateral_mask, 'regime'] = 0
-        
-        # Clase 1: TENDENCIA ALCISTA
+
+        # Inicializar regime como NaN (no clasificado)
+        df['regime'] = np.nan
+
+        # CLASE 1: LONG (Tendencia Alcista CLARA)
+        # Condiciones:
+        # - Return positivo significativo (> trend_threshold)
+        # - Volatilidad controlada (< vol_high)
         bullish_mask = (
-            (df['regime'] == -1) &
             (df['forward_return'] > self.trend_threshold) &
-            (df['forward_volatility'] < self.vol_high)
+            (df['forward_volatility'] < self.vol_high) &
+            (df['forward_volatility'].notna())
         )
         df.loc[bullish_mask, 'regime'] = 1
-        
-        # Clase 2: TENDENCIA BAJISTA
+
+        # CLASE 0: SHORT (Tendencia Bajista CLARA)
+        # Condiciones:
+        # - Return negativo significativo (< -trend_threshold)
+        # - Volatilidad controlada (< vol_high)
         bearish_mask = (
-            (df['regime'] == -1) &
             (df['forward_return'] < -self.trend_threshold) &
-            (df['forward_volatility'] < self.vol_high)
+            (df['forward_volatility'] < self.vol_high) &
+            (df['forward_volatility'].notna())
         )
-        df.loc[bearish_mask, 'regime'] = 2
-        
-        # Cualquier registro sin clasificar -> Asignar como Lateral (clase 0)
-        df.loc[df['regime'] == -1, 'regime'] = 0
-        
-        # Eliminar filas sin target (últimas N filas)
-        df.dropna(subset=['forward_return'], inplace=True)
-        
+        df.loc[bearish_mask, 'regime'] = 0
+
+        # CRÍTICO: Eliminar velas sin oportunidad clara (laterales, extremas, etc.)
+        # Solo mantenemos velas con regime=0 o regime=1
+        df_original_len = len(df)
+        df = df.dropna(subset=['regime'])
+        df_filtered_len = len(df)
+
+        logger.info(f"✂️ Filtrado: {df_original_len} velas → {df_filtered_len} oportunidades claras")
+        logger.info(f"   Descartadas: {df_original_len - df_filtered_len} velas laterales/inciertas ({(df_original_len - df_filtered_len)/df_original_len*100:.1f}%)")
+
+        # Convertir regime a int
+        df['regime'] = df['regime'].astype(int)
+
+        # Eliminar filas sin forward_return (últimas N velas)
+        df = df.dropna(subset=['forward_return'])
+
         # Estadísticas de distribución
         self._log_regime_distribution(df)
-        
+
         return df
     
     def create_adaptive_labels(self, df: pd.DataFrame, 

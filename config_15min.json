@@ -139,9 +139,9 @@
   },
 
   "model": {
-    "_comment": "Configuración del modelo ML - 15MIN TIMEFRAME",
+    "_comment": "Configuración del modelo ML - 1H TIMEFRAME",
     "type": "xgboost",
-    "n_classes": 3,
+    "n_classes": 2,
     "model_dir": "./models",
     "model_path": "./models/xgboost_model.pkl",
 

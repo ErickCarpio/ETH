@@ -66,12 +66,25 @@ class XGBoostRegimeModel:
         balanced_weights = self._calculate_balanced_weights(y_train, sample_weights)
 
         def objective(trial):
-            params = {
-                'objective': 'multi:softmax',
-                'num_class': self.n_classes,
-                'eval_metric': 'mlogloss',
-                'tree_method': 'hist',
-                'device': 'cpu',
+            # Configuración según tipo de clasificación
+            if self.n_classes == 2:
+                params = {
+                    'objective': 'binary:logistic',
+                    'eval_metric': 'logloss',
+                    'tree_method': 'hist',
+                    'device': 'cpu',
+                }
+            else:
+                params = {
+                    'objective': 'multi:softmax',
+                    'num_class': self.n_classes,
+                    'eval_metric': 'mlogloss',
+                    'tree_method': 'hist',
+                    'device': 'cpu',
+                }
+
+            # Hiperparámetros comunes
+            params.update({
                 'max_depth': trial.suggest_int('max_depth', 3, 12),
                 'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.3, log=True),
                 'n_estimators': trial.suggest_int('n_estimators', 100, 800),
@@ -107,10 +120,21 @@ class XGBoostRegimeModel:
         study.optimize(objective, n_trials=self.optuna_trials, show_progress_bar=True)
 
         self.best_params = study.best_params
+
+        # Configuración según tipo de clasificación
+        if self.n_classes == 2:
+            self.best_params.update({
+                'objective': 'binary:logistic',
+                'eval_metric': 'logloss',
+            })
+        else:
+            self.best_params.update({
+                'objective': 'multi:softmax',
+                'num_class': self.n_classes,
+                'eval_metric': 'mlogloss',
+            })
+
         self.best_params.update({
-            'objective': 'multi:softmax',
-            'num_class': self.n_classes,
-            'eval_metric': 'mlogloss',
             'tree_method': 'hist',
             'device': 'cpu',
             'random_state': 42
