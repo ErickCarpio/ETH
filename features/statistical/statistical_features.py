@@ -248,7 +248,20 @@ class StatisticalFeatureEngine:
             C = [len([1 for x_j in x if _maxdist(x_i, x_j) <= tolerance]) - 1 for x_i in x]
             return sum(C)
 
-        return -np.log(_phi(m + 1) / (_phi(m) + 1e-8))
+        phi_m = _phi(m)
+        phi_m1 = _phi(m + 1)
+
+        # Evitar división por cero y log de cero
+        if phi_m == 0 or phi_m1 == 0:
+            return 0.0
+
+        ratio = phi_m1 / phi_m
+
+        # Evitar log de valores <= 0
+        if ratio <= 0:
+            return 0.0
+
+        return -np.log(ratio)
 
     def calculate_approximate_entropy(self, series: np.ndarray, m: int = 2, r: float = 0.2) -> float:
         """
@@ -262,10 +275,17 @@ class StatisticalFeatureEngine:
             return 0.0
 
         # Normalizar
-        series = (series - np.mean(series)) / (np.std(series) + 1e-8)
+        std_val = np.std(series)
+        if std_val < 1e-8:
+            return 0.0
+
+        series = (series - np.mean(series)) / std_val
         tolerance = r
 
         def _phi(m):
+            if N - m + 1 <= 0:
+                return 0.0
+
             patterns = np.array([series[i:i + m] for i in range(N - m + 1)])
             C = np.zeros(N - m + 1)
 
@@ -274,9 +294,28 @@ class StatisticalFeatureEngine:
                 distances = np.max(np.abs(patterns - template), axis=1)
                 C[i] = np.sum(distances <= tolerance) / (N - m + 1)
 
-            return np.sum(np.log(C + 1e-8)) / (N - m + 1)
+            # Evitar log(0) reemplazando valores muy pequeños
+            C = np.maximum(C, 1e-10)
+            result = np.sum(np.log(C)) / (N - m + 1)
 
-        return _phi(m) - _phi(m + 1)
+            # Verificar que el resultado es finito
+            if not np.isfinite(result):
+                return 0.0
+
+            return result
+
+        try:
+            phi_m = _phi(m)
+            phi_m1 = _phi(m + 1)
+            apen = phi_m - phi_m1
+
+            # Verificar que el resultado es finito
+            if not np.isfinite(apen):
+                return 0.0
+
+            return apen
+        except:
+            return 0.0
 
     def calculate_fractal_dimension(self, series: np.ndarray) -> float:
         """
@@ -511,6 +550,22 @@ class StatisticalFeatureEngine:
         )]
 
         logger.info(f"✅ Statistical features generadas: {len(statistical_cols)}")
+
+        # CRÍTICO: Limpiar valores inf y NaN para XGBoost
+        # XGBoost no puede manejar inf, -inf, o valores extremadamente grandes
+        for col in statistical_cols:
+            if col in df.columns:
+                # Reemplazar inf con 0
+                df[col] = df[col].replace([np.inf, -np.inf], 0.0)
+
+                # Rellenar NaN con 0
+                df[col] = df[col].fillna(0.0)
+
+                # Clip valores extremos (opcional pero recomendado)
+                # Mantener valores en rango razonable [-1e6, 1e6]
+                df[col] = df[col].clip(-1e6, 1e6)
+
+        logger.info(f"🧹 Statistical features limpiadas (inf/NaN → 0)")
 
         return df
 
