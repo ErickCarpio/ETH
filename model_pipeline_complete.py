@@ -308,15 +308,18 @@ def main():
 
     # 4. Crear targets
     logger.info("\n4. Creando targets...")
-    # Parámetros ajustados para 15min:
-    # - forward_window: 32 velas = 8h (antes 16 = 4h)
-    # - volatility_threshold_low: 0.01 = 1% (antes 1.5%)
-    # - trend_threshold: 0.012 = 1.2% (antes 2%)
+    # ESTRATEGIA: CALIDAD sobre CANTIDAD
+    # Capturar MENOS señales pero REALES (no ruido)
+    # - forward_window: 48 velas = 12h (tendencias significativas)
+    # - trend_threshold: 2.5% (movimientos grandes y claros)
+    # - volatility_threshold_low: 0.018 (1.8% - muy selectivo)
+    #
+    # Objetivo: 70-75% NO_TRADE, pero cuando dice LONG/SHORT que sea CONFIABLE
     labeler = RegimeLabeler(
-        forward_window=32,  # 32 velas × 15min = 8 horas (captura tendencias más largas)
-        volatility_threshold_low=0.010,  # 1% - menos conservador para lateral
-        volatility_threshold_high=0.045,  # 4.5% - umbral para volatilidad extrema
-        trend_threshold=0.012  # 1.2% - más sensible a tendencias en 15min
+        forward_window=48,  # 48 velas × 15min = 12 horas (tendencias claras)
+        volatility_threshold_low=0.018,  # 1.8% - MUY selectivo para lateral
+        volatility_threshold_high=0.055,  # 5.5% - umbral para volatilidad extrema
+        trend_threshold=0.025  # 2.5% - solo movimientos SIGNIFICATIVOS en 12h
     )
 
     # Preparar datos para labeling
