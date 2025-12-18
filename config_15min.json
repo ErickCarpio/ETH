@@ -1,0 +1,243 @@
+{
+  "_comment": "=============================================================================",
+  "_comment_2": "CONFIGURACIÓN DEL SISTEMA DE TRADING ETH - 15MIN TIMEFRAME",
+  "_comment_3": "=============================================================================",
+
+  "exchange": {
+    "name": "binance",
+    "symbol": "ETHUSDT",
+    "testnet": true,
+
+    "_comment": "--- PRODUCCIÓN (Binance.com) ---",
+    "api_key": "zkWNnqvkhJg7BJRYL0OoFlaWAWh2gHpcpSJH9SUU3UCHcDs7pw0FqSOvaeaNYPEf",
+    "api_secret": "2Tub8roQHafYMZNBOmYgfRG6afHOc9C9a7oMwG4r9NthqTnVsfNpLnViEn74qog5",
+
+    "_comment_testnet": "--- TESTNET (testnet.binancefuture.com) ---",
+    "testnet_api_key": "0wovgYaYitaQX5RWFr2hmegDsvtoPFMEMI2IMy8nx91HrxrR7y5GyPXZqSTGDMQA",
+    "testnet_api_secret": "wBiMJGFDaf84eE45eUJFOh56y8zCa39RBGpZaRikEY3ykQbw0oPWvxtDca4gjPVl"
+  },
+
+  "trading": {
+    "_comment": "Configuración de trading",
+    "total_capital": 1000.0,
+    "grid_allocation": 0.80,
+    "min_order_value": 20.0,
+    "position_size_usd": 100,
+
+    "_comment_ml": "Configuración ML predictions",
+    "prediction_threshold": 0.65,
+    "max_positions": 1,
+    "use_stop_loss": true,
+    "stop_loss_pct": 0.02,
+    "take_profit_pct": 0.05,
+
+    "_comment_grid": "Configuración Grid Trading",
+    "min_grid_spacing": 0.005,
+    "max_grid_spacing": 0.03,
+    "max_duration_hours": 72
+  },
+
+  "data": {
+    "_comment": "Configuración de datos - 15MIN TIMEFRAME",
+    "window_years": 2,
+    "timeframe": "15m",
+    "_comment_timeframe": "IMPORTANTE: 15min para trading, 4H para contexto macro",
+    "include_onchain": true,
+    "include_sentiment": true,
+
+    "_comment_questdb": "QuestDB (base de datos tiempo real)",
+    "questdb_host": "localhost",
+    "questdb_http_port": 9000,
+    "questdb_ilp_port": 9009,
+    "questdb_pg_port": 8812,
+
+    "_comment_cache": "Cache settings",
+    "use_cache": true,
+    "cache_ttl_seconds": 60,
+    "cache_max_size": 1000
+  },
+
+  "external_apis": {
+    "_comment": "APIs externas",
+
+    "cryptopanic": {
+      "enabled": true,
+      "api_key": "dd3ec2c5ee8e75423c11ff8eb84c9f2726953af4"
+    },
+
+    "newsapi": {
+      "enabled": true,
+      "api_key": "f27d99d4600645eb860ef7f4f1a631ba"
+    },
+
+    "coinglass": {
+      "enabled": true,
+      "api_key": "e8edff3d5f0c40a3af7cd836600c725b",
+      "_comment": "Datos reales de derivados (OI, Funding)"
+    },
+
+    "deribit": {
+      "enabled": true,
+      "_comment": "API pública (no requiere key para GEX)"
+    },
+
+    "defillama": {
+      "enabled": true,
+      "_comment": "API pública (TVL DeFi)"
+    },
+
+    "use_simulated_data": false
+  },
+
+  "sentiment": {
+    "_comment": "Configuración de sentiment analysis",
+    "min_confidence": 0.90,
+    "keywords": ["ethereum", "ETH", "crypto"],
+    "lookback_days": 28,
+    "aggregation_freq": "15min"
+  },
+
+  "features": {
+    "_comment": "Control de features (FASES 1-6) + MACRO 4H",
+
+    "use_microstructure": true,
+    "_comment_micro": "FASE 2: Order Book, VPIN, OFI (~150 features)",
+
+    "use_derivatives": true,
+    "_comment_deriv": "FASE 3: GEX, Funding, Liquidaciones (~80 features)",
+
+    "use_statistical": true,
+    "_comment_stat": "FASE 4: Hurst, Entropy, Kalman (~100 features)",
+
+    "use_tsfresh": true,
+    "tsfresh_top_n": 100,
+    "_comment_tsfresh": "FASE 5: Auto-generación (~100 features elite)",
+
+    "use_macro_4h": true,
+    "_comment_macro": "NUEVO: Features macro de 4H (tendencia, volatilidad, RSI)",
+
+    "microstructure": {
+      "obi_levels": [1, 5, 10, 20],
+      "vpin_buckets": 50,
+      "vpin_bucket_size": 1000,
+      "ofi_enabled": true,
+      "microprice_enabled": true
+    },
+
+    "derivatives": {
+      "gex_min_oi": 10,
+      "funding_window_hours": 8,
+      "liquidations_threshold_usd": 1000000
+    },
+
+    "statistical": {
+      "hurst_windows": [24, 72, 168],
+      "kalman_initial_estimate": 0.01,
+      "wavelet_scales": [1, 2, 4, 8, 16, 32, 64, 128],
+      "fft_n_coefs": 20
+    }
+  },
+
+  "model": {
+    "_comment": "Configuración del modelo ML - 15MIN TIMEFRAME",
+    "type": "xgboost",
+    "n_classes": 3,
+    "model_dir": "./models",
+    "model_path": "./models/xgboost_model.pkl",
+
+    "_comment_training": "Parámetros de entrenamiento",
+    "optuna_trials": 100,
+    "quick_retrain_trials": 100,
+    "retrain_every_days": 7,
+
+    "_comment_target": "Target labeling - TRADING SIGNALS (LONG/SHORT/NO_TRADE) para 15MIN",
+    "target_method": "trading_signals",
+    "forward_window": 16,
+    "_comment_forward": "16 velas × 15min = 4 horas (ajustar: 8=2h, 16=4h, 32=8h, 48=12h)",
+    "min_reward_risk": 1.5,
+    "min_move_pct": 0.015,
+    "atr_multiplier_sl": 2.0,
+    "atr_multiplier_tp": 4.0,
+
+    "_comment_legacy_regime": "Legacy regime labeling (fixed_horizon, static, adaptive, volatility_quantiles)",
+    "target_threshold_pct": 0.005,
+    "horizon_hours": 4,
+
+    "_comment_weighting": "Sample weighting",
+    "use_time_decay": true,
+    "time_decay_halflife_days": 30,
+    "use_volatility_weighting": true,
+    "use_class_balancing": true
+  },
+
+  "websocket": {
+    "_comment": "Configuración WebSocket (FASE 1) - 15MIN",
+    "binance_ws_url": "wss://stream.binance.com:9443/ws",
+    "binance_futures_ws_url": "wss://fstream.binance.com/ws",
+    "max_connections": 5,
+    "reconnect_delay_seconds": 5,
+    "max_reconnect_attempts": 10,
+    "heartbeat_interval_seconds": 180,
+    "message_buffer_size": 1000
+  },
+
+  "orderbook": {
+    "_comment": "Configuración Order Book reconstruction",
+    "depth_limit": 20,
+    "snapshot_interval_seconds": 60,
+    "validate_sequence": true,
+    "diff_buffer_size": 100
+  },
+
+  "rate_limiting": {
+    "_comment": "Rate limits por API",
+    "binance_rest": {
+      "requests_per_minute": 1200,
+      "weight_per_snapshot": 50
+    },
+    "deribit": {
+      "requests_per_10s": 20
+    },
+    "coinglass": {
+      "requests_per_day": 100
+    }
+  },
+
+  "logging": {
+    "_comment": "Configuración de logs",
+    "level": "INFO",
+    "log_dir": "./logs",
+    "log_to_file": true,
+    "log_to_console": true,
+    "max_log_size_mb": 100,
+    "backup_count": 5
+  },
+
+  "dev": {
+    "_comment": "Configuración de desarrollo",
+    "use_simulated_data": false,
+    "paper_trading": true,
+    "debug_mode": false,
+    "save_predictions": true,
+    "predictions_file": "./logs/predictions.csv"
+  },
+
+  "alerts": {
+    "_comment": "Alertas y notificaciones",
+    "enabled": false,
+    "telegram_bot_token": "",
+    "telegram_chat_id": "",
+    "alert_on_trade": true,
+    "alert_on_error": true,
+    "alert_on_high_confidence": true,
+    "high_confidence_threshold": 0.85
+  },
+
+  "performance": {
+    "_comment": "Métricas de performance",
+    "track_latency": true,
+    "track_memory": true,
+    "max_memory_mb": 2048,
+    "max_feature_calc_time_ms": 100
+  }
+}
