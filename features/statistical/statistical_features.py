@@ -539,7 +539,7 @@ class StatisticalFeatureEngine:
             df.loc[df.index[i], 'dfa_fluctuation'] = fluctuation
 
         # Fill NaN
-        df.fillna(0, inplace=True)
+        df = df.fillna(0)
 
         # Contar features generadas
         statistical_cols = [col for col in df.columns if any(

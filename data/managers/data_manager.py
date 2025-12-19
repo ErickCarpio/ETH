@@ -48,8 +48,11 @@ class DataManager:
             age_hours = (datetime.now() - mod_time).total_seconds() / 3600
             if age_hours < max_age_hours:
                 logger.info(f"📂 Cargando {name} desde caché local (Edad: {age_hours:.1f}h)")
-                try: return pd.read_parquet(file_path)
-                except: pass
+                try:
+                    return pd.read_parquet(file_path)
+                except (IOError, OSError, pd.errors.ParserError) as e:
+                    logger.warning(f"⚠️ Error leyendo cache {name}: {e}")
+                    pass
         return pd.DataFrame()
 
     def _save_to_cache(self, df: pd.DataFrame, name: str):
@@ -87,7 +90,7 @@ class DataManager:
         if not all_candles: return pd.DataFrame()
         df = pd.DataFrame(all_candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        df.set_index('timestamp', inplace=True)
+        df = df.set_index('timestamp')
 
         # Limitar a max_candles más recientes
         if len(df) > max_candles:

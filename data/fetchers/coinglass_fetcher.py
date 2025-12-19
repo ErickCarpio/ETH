@@ -101,8 +101,8 @@ class CoinglassFetcher:
                 })
 
             df = pd.DataFrame(records)
-            df.set_index('timestamp', inplace=True)
-            df.sort_index(inplace=True)
+            df = df.set_index('timestamp')
+            df = df.sort_index()
 
             # Calcular derivadas
             df['oi_change'] = df['open_interest'].pct_change()
@@ -161,8 +161,8 @@ class CoinglassFetcher:
                 })
 
             df = pd.DataFrame(records)
-            df.set_index('timestamp', inplace=True)
-            df.sort_index(inplace=True)
+            df = df.set_index('timestamp')
+            df = df.sort_index()
 
             logger.info(f"✓ Funding Rate: {len(df)} registros")
 

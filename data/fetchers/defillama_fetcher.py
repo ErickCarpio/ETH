@@ -106,8 +106,8 @@ class DefiLlamaFetcher:
                 return pd.DataFrame()
 
             df = pd.DataFrame(records)
-            df.set_index('timestamp', inplace=True)
-            df.sort_index(inplace=True)
+            df = df.set_index('timestamp')
+            df = df.sort_index()
 
             # Calcular métricas derivadas
             df['mcap_change_1d'] = df['total_mcap'].diff()

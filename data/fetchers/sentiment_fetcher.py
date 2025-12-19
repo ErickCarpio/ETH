@@ -160,11 +160,12 @@ class SentimentFetcher:
             with torch.no_grad():
                 outputs = self.finbert_model(**inputs)
                 probs = torch.nn.functional.softmax(outputs.logits, dim=-1).numpy()[0]
-            
+
             # [Pos, Neg, Neu] -> Score = Pos - Neg
             score = probs[0] - probs[1]
             return {'score': float(score), 'confidence': float(probs.max())}
-        except:
+        except (RuntimeError, ValueError, IndexError) as e:
+            logger.warning(f"⚠️ Error en análisis de sentimiento: {e}")
             return {'score': 0.0, 'confidence': 0.0}
 
     def get_sentiment_dataset(self, days: int = 28) -> pd.DataFrame:
@@ -195,9 +196,9 @@ class SentimentFetcher:
         if df.empty:
              return pd.DataFrame(columns=['FinBERT_Score'])
 
-        df.set_index('timestamp', inplace=True)
+        df = df.set_index('timestamp')
         agg = df.resample('4h').agg({'sentiment_score': 'mean'})  # Fix: 'H' -> 'h'
-        agg.rename(columns={'sentiment_score': 'FinBERT_Score'}, inplace=True)
-        agg.fillna(0, inplace=True)
+        agg = agg.rename(columns={'sentiment_score': 'FinBERT_Score'})
+        agg = agg.fillna(0)
         
         return agg

@@ -192,7 +192,9 @@ class FeatureEngineer:
                     rolling_mean = df['net_flow'].rolling(42).mean()
                     rolling_std = df['net_flow'].rolling(42).std()
                     df['Net_Flow_Z'] = ((df['net_flow'] - rolling_mean) / (rolling_std + 1e-8)).clip(-5,5)
-            except: pass
+            except (KeyError, ValueError, TypeError) as e:
+                logger.warning(f"⚠️ Error procesando onchain data: {e}")
+                pass
 
         if 'Net_Flow_Z' not in df.columns: df['Net_Flow_Z'] = 0.0
 
