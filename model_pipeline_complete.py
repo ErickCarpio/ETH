@@ -640,8 +640,9 @@ def main():
 
     from backtesting.backtester import Backtester, optimize_tp_sl
 
-    # Obtener predicciones en validación
+    # Obtener predicciones Y probabilidades en validación
     y_val_pred = model.predict(X_val)
+    y_val_proba = model.predict_proba(X_val)  # Shape: (n_samples, 2)
 
     # Crear DataFrame de validación con OHLCV
     # Necesitamos reconstruir los datos OHLCV para el backtest
@@ -654,6 +655,7 @@ def main():
         sl_pct = config.get('trading', {}).get('stop_loss_pct', 0.02)
         tp_pct = config.get('trading', {}).get('take_profit_pct', 0.05)
         pos_size = config.get('trading', {}).get('position_size_usd', 100)
+        pred_threshold = config.get('trading', {}).get('prediction_threshold', 0.65)
 
         backtester = Backtester(
             stop_loss_pct=sl_pct,
@@ -662,7 +664,8 @@ def main():
             max_positions=1
         )
 
-        stats = backtester.run(df_val_ohlcv, y_val_pred)
+        # Pasar probabilidades y threshold al backtester
+        stats = backtester.run(df_val_ohlcv, y_val_pred, probabilities=y_val_proba, prediction_threshold=pred_threshold)
         backtester.print_summary(stats)
 
         # Mostrar primeros trades
@@ -671,19 +674,30 @@ def main():
             logger.info("\n📋 Últimos 10 trades:")
             print(trade_history.tail(10).to_string(index=False))
 
-        # Optimizar TP/SL (opcional, comentado por defecto para velocidad)
-        # logger.info("\n🔍 Optimizando TP/SL...")
-        # optimization = optimize_tp_sl(
-        #     df_val_ohlcv,
-        #     y_val_pred,
-        #     sl_range=(0.01, 0.04),
-        #     tp_range=(0.02, 0.08),
-        #     step=0.005,
-        #     position_size=pos_size
-        # )
-        # logger.info(f"   Mejor SL: {optimization['best_params']['sl']*100:.1f}%")
-        # logger.info(f"   Mejor TP: {optimization['best_params']['tp']*100:.1f}%")
-        # logger.info(f"   P&L: ${optimization['best_stats']['total_pnl']:.2f}")
+        # Optimizar Threshold + TP/SL para maximizar win rate
+        from backtesting.backtester import optimize_threshold_and_tpsl
+        logger.info("\n🔍 Optimizando Threshold + TP/SL para Win Rate 50%+...")
+        optimization = optimize_threshold_and_tpsl(
+            df_val_ohlcv,
+            y_val_pred,
+            y_val_proba,
+            threshold_range=(0.60, 0.85),
+            sl_range=(0.015, 0.03),
+            tp_range=(0.03, 0.08),
+            threshold_step=0.05,
+            tpsl_step=0.005,
+            position_size=pos_size
+        )
+
+        if optimization:
+            logger.info("\n✅ PARÁMETROS ÓPTIMOS:")
+            logger.info(f"   Threshold: {optimization['best_params']['threshold']:.2%}")
+            logger.info(f"   SL: {optimization['best_params']['sl']*100:.1f}%")
+            logger.info(f"   TP: {optimization['best_params']['tp']*100:.1f}%")
+            logger.info(f"   Win Rate: {optimization['best_stats']['win_rate']:.2%}")
+            logger.info(f"   P&L: ${optimization['best_stats']['total_pnl']:.2f}")
+            logger.info(f"   Trades: {optimization['best_stats']['total_trades']}")
+            logger.info(f"   Profit Factor: {optimization['best_stats']['profit_factor']:.2f}")
 
     else:
         logger.warning("   ⚠️ No se pueden ejecutar backtests (faltan columnas OHLCV)")

@@ -106,19 +106,22 @@ class Backtester:
         self.trades: List[Trade] = []
         self.current_position: Optional[Trade] = None
 
-    def run(self, df: pd.DataFrame, predictions: np.ndarray, prediction_threshold=0.65) -> Dict:
+    def run(self, df: pd.DataFrame, predictions: np.ndarray, probabilities: np.ndarray = None, prediction_threshold=0.65) -> Dict:
         """
         Ejecuta backtesting en un DataFrame.
 
         Args:
             df: DataFrame con OHLCV data (debe tener: open, high, low, close)
             predictions: Array con predicciones del modelo (0=SHORT, 1=LONG)
-            prediction_threshold: Umbral de confianza (no usado en clasificación binaria directa)
+            probabilities: Array opcional con probabilidades [prob_class_0, prob_class_1]
+            prediction_threshold: Umbral de confianza mínimo (0.5-1.0). Solo opera si probability >= threshold
 
         Returns:
             Diccionario con resultados del backtesting
         """
         logger.info("🔄 Ejecutando backtesting...")
+        if probabilities is not None:
+            logger.info(f"   🎯 Threshold de confianza: {prediction_threshold:.2%}")
 
         self.trades = []
         self.current_position = None
@@ -145,8 +148,15 @@ class Backtester:
             if self.current_position is None and i < len(predictions):
                 signal = predictions[i]
 
-                # Abrir posición si hay señal clara
-                if signal in [0, 1]:  # SHORT o LONG
+                # Verificar confianza si se proporcionaron probabilidades
+                should_trade = True
+                if probabilities is not None:
+                    # probabilities shape: (n_samples, 2) -> [prob_class_0, prob_class_1]
+                    max_prob = probabilities[i].max()
+                    should_trade = max_prob >= prediction_threshold
+
+                # Abrir posición si hay señal clara Y confianza suficiente
+                if signal in [0, 1] and should_trade:
                     self.current_position = Trade(
                         entry_time=current_time,
                         entry_price=current_close,  # Asumimos entrada al cierre
@@ -340,6 +350,95 @@ def optimize_tp_sl(df: pd.DataFrame, predictions: np.ndarray,
     logger.info(f"✅ Optimización completada")
     logger.info(f"   Mejor SL: {best_params['sl']*100:.1f}%")
     logger.info(f"   Mejor TP: {best_params['tp']*100:.1f}%")
+    logger.info(f"   P&L: ${best_pnl:.2f}")
+
+    return {
+        'best_params': best_params,
+        'best_stats': best_stats,
+        'all_results': pd.DataFrame(results)
+    }
+
+
+def optimize_threshold_and_tpsl(df: pd.DataFrame, predictions: np.ndarray, probabilities: np.ndarray,
+                                 threshold_range=(0.55, 0.85), sl_range=(0.015, 0.03), tp_range=(0.03, 0.08),
+                                 threshold_step=0.05, tpsl_step=0.005, position_size=100) -> Dict:
+    """
+    Optimiza threshold de confianza + TP/SL mediante grid search.
+
+    Args:
+        df: DataFrame con OHLCV
+        predictions: Predicciones del modelo (0=SHORT, 1=LONG)
+        probabilities: Probabilidades del modelo shape (n_samples, 2)
+        threshold_range: Rango de thresholds a probar (min, max)
+        sl_range: Rango de SL a probar (min, max)
+        tp_range: Rango de TP a probar (min, max)
+        threshold_step: Paso para threshold
+        tpsl_step: Paso para TP/SL
+        position_size: Tamaño de posición
+
+    Returns:
+        Mejores parámetros y resultados (threshold, sl, tp)
+    """
+    logger.info("🔍 Optimizando Threshold + TP/SL...")
+
+    best_win_rate = 0.0
+    best_params = None
+    best_stats = None
+    best_pnl = -float('inf')
+
+    results = []
+
+    # Grid search
+    threshold_values = np.arange(threshold_range[0], threshold_range[1] + threshold_step, threshold_step)
+    sl_values = np.arange(sl_range[0], sl_range[1] + tpsl_step, tpsl_step)
+    tp_values = np.arange(tp_range[0], tp_range[1] + tpsl_step, tpsl_step)
+
+    total_combinations = len(threshold_values) * len(sl_values) * len(tp_values)
+    logger.info(f"   Probando {total_combinations} combinaciones...")
+
+    for threshold in threshold_values:
+        for sl in sl_values:
+            for tp in tp_values:
+                # Validar que TP > SL (risk/reward positivo)
+                if tp <= sl:
+                    continue
+
+                backtester = Backtester(
+                    stop_loss_pct=sl,
+                    take_profit_pct=tp,
+                    position_size=position_size
+                )
+
+                stats = backtester.run(df, predictions, probabilities=probabilities, prediction_threshold=threshold)
+
+                # Solo considerar si hay trades suficientes
+                if stats['total_trades'] >= 10:
+                    results.append({
+                        'threshold': threshold,
+                        'sl': sl,
+                        'tp': tp,
+                        'total_pnl': stats['total_pnl'],
+                        'win_rate': stats['win_rate'],
+                        'total_trades': stats['total_trades'],
+                        'profit_factor': stats['profit_factor']
+                    })
+
+                    # Criterio: Maximizar win_rate, luego P&L
+                    if stats['win_rate'] > best_win_rate or (stats['win_rate'] == best_win_rate and stats['total_pnl'] > best_pnl):
+                        best_win_rate = stats['win_rate']
+                        best_pnl = stats['total_pnl']
+                        best_params = {'threshold': threshold, 'sl': sl, 'tp': tp}
+                        best_stats = stats
+
+    if best_params is None:
+        logger.warning("⚠️ No se encontraron combinaciones válidas")
+        return None
+
+    logger.info(f"✅ Optimización completada")
+    logger.info(f"   Mejor Threshold: {best_params['threshold']:.2%}")
+    logger.info(f"   Mejor SL: {best_params['sl']*100:.1f}%")
+    logger.info(f"   Mejor TP: {best_params['tp']*100:.1f}%")
+    logger.info(f"   Win Rate: {best_win_rate:.2%}")
     logger.info(f"   P&L: ${best_pnl:.2f}")
 
     return {
