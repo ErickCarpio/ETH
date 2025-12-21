@@ -102,57 +102,83 @@ class LiveTradingBot:
             exchange_config = self.config['exchange']
             trading_config = self.config['trading']
 
-            # Usar credenciales de testnet
-            api_key = exchange_config.get('testnet_api_key', '').strip()
-            api_secret = exchange_config.get('testnet_api_secret', '').strip()
+            # Verificar si es paper trading (simulado)
+            is_paper_trading = exchange_config.get('paper_trading', True)
 
-            self.exchange = ccxt.binance({
-                'apiKey': api_key,
-                'secret': api_secret,
-                'enableRateLimit': True,
-                'options': {'defaultType': 'future'}
-            })
+            if is_paper_trading:
+                # PAPER TRADING: Solo descarga datos, no ejecuta órdenes reales
+                logger.info("🧪 Modo PAPER TRADING (Simulado - Sin Riesgo)")
+                logger.info("   Los trades se simulan localmente sin conectar a Binance")
 
-            if exchange_config.get('testnet', True):
-                self.exchange.set_sandbox_mode(True)
-                logger.info("🔧 Conectado a Binance Testnet (Futures)")
+                # Conectar solo para obtener datos de mercado (sin API keys)
+                self.exchange = ccxt.binance({
+                    'enableRateLimit': True,
+                    'options': {'defaultType': 'future'}
+                })
+
+                await self.exchange.load_markets()
+                logger.info("✓ Conectado a Binance (solo lectura de precios)")
+
+                # Simular balance
+                self.simulated_balance = 10000.0  # $10,000 simulados
+                logger.info(f"✓ Balance Simulado: ${self.simulated_balance:.2f}")
+
             else:
-                logger.warning("🔥 MODO PRODUCCIÓN - Dinero Real")
+                # REAL TRADING: Conexión real con API keys
+                logger.warning("🔥 MODO REAL TRADING - Dinero Real")
 
-            await self.exchange.load_markets()
+                api_key = exchange_config.get('api_key', '').strip()
+                api_secret = exchange_config.get('api_secret', '').strip()
 
-            # Configurar LEVERAGE y MARGIN MODE
+                if not api_key or not api_secret:
+                    raise ValueError("API keys de producción no configuradas en config_15min.json")
+
+                self.exchange = ccxt.binance({
+                    'apiKey': api_key,
+                    'secret': api_secret,
+                    'enableRateLimit': True,
+                    'options': {'defaultType': 'future'}
+                })
+
+                await self.exchange.load_markets()
+
+                # Configurar LEVERAGE y MARGIN MODE
+                symbol = exchange_config.get('symbol', 'ETHUSDT')
+                leverage = trading_config.get('leverage', 1)
+                margin_mode = trading_config.get('margin_mode', 'ISOLATED')
+
+                try:
+                    # Establecer modo de margen
+                    await self.exchange.fapiPrivate_post_margintype({
+                        'symbol': symbol.replace('/', ''),
+                        'marginType': margin_mode
+                    })
+                    logger.info(f"✓ Margin Mode: {margin_mode}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Margin mode: {e}")
+
+                try:
+                    # Establecer apalancamiento
+                    await self.exchange.fapiPrivate_post_leverage({
+                        'symbol': symbol.replace('/', ''),
+                        'leverage': leverage
+                    })
+                    logger.info(f"✓ Leverage configurado: {leverage}x")
+                except Exception as e:
+                    logger.warning(f"⚠️ Leverage: {e}")
+
+                # Verificar balance real
+                balance = await self.exchange.fetch_balance()
+                logger.info(f"✓ Balance USDT: ${balance['USDT']['free']:.2f}")
+
+            # Mostrar configuración de trading
             symbol = exchange_config.get('symbol', 'ETHUSDT')
             leverage = trading_config.get('leverage', 1)
             margin_mode = trading_config.get('margin_mode', 'ISOLATED')
 
-            try:
-                # Establecer modo de margen (ISOLATED o CROSS)
-                await self.exchange.fapiPrivate_post_margintype({
-                    'symbol': symbol.replace('/', ''),
-                    'marginType': margin_mode
-                })
-                logger.info(f"✓ Margin Mode: {margin_mode}")
-            except Exception as e:
-                logger.warning(f"⚠️ No se pudo establecer margin mode (puede que ya esté configurado): {e}")
-
-            try:
-                # Establecer apalancamiento
-                await self.exchange.fapiPrivate_post_leverage({
-                    'symbol': symbol.replace('/', ''),
-                    'leverage': leverage
-                })
-                logger.info(f"✓ Leverage configurado: {leverage}x")
-            except Exception as e:
-                logger.warning(f"⚠️ No se pudo establecer leverage: {e}")
-
-            # Verificar balance
-            balance = await self.exchange.fetch_balance()
-            logger.info(f"✓ Balance USDT: ${balance['USDT']['free']:.2f}")
-
-            # Mostrar configuración de trading
-            logger.info("=" * 50)
+            logger.info("=" * 60)
             logger.info("📊 CONFIGURACIÓN DE TRADING:")
+            logger.info(f"   Modo: {'PAPER TRADING (Simulado)' if is_paper_trading else 'REAL TRADING'}")
             logger.info(f"   Mercado: FUTUROS (Futures)")
             logger.info(f"   Símbolo: {symbol}")
             logger.info(f"   Leverage: {leverage}x")
@@ -161,7 +187,7 @@ class LiveTradingBot:
             logger.info(f"   Stop Loss: {trading_config.get('stop_loss_pct', 0.02) * 100:.1f}%")
             logger.info(f"   Take Profit: {trading_config.get('take_profit_pct', 0.05) * 100:.1f}%")
             logger.info(f"   Threshold: {trading_config.get('prediction_threshold', 0.70) * 100:.0f}%")
-            logger.info("=" * 50)
+            logger.info("=" * 60)
 
             return True
 
@@ -245,7 +271,7 @@ class LiveTradingBot:
             return None, 0.0
 
     async def execute_trade(self, signal, confidence, current_price):
-        """Ejecuta trade en Binance Testnet"""
+        """Ejecuta trade (real o simulado según configuración)"""
         try:
             threshold = self.config['trading']['prediction_threshold']
 
@@ -261,8 +287,27 @@ class LiveTradingBot:
             symbol = self.config['exchange']['symbol']
             side = 'buy' if signal == 'LONG' else 'sell'
 
-            # En testnet, ejecutar orden real
-            order = await self.exchange.create_market_order(symbol, side, quantity)
+            # Verificar si es paper trading
+            is_paper_trading = self.config['exchange'].get('paper_trading', True)
+
+            if is_paper_trading:
+                # PAPER TRADING: Simular orden sin ejecutar en exchange
+                order = {
+                    'id': f"SIM_{int(datetime.now().timestamp())}",
+                    'symbol': symbol,
+                    'side': side,
+                    'type': 'market',
+                    'price': current_price,
+                    'amount': quantity,
+                    'filled': quantity,
+                    'status': 'closed',
+                    'timestamp': int(datetime.now().timestamp() * 1000)
+                }
+                logger.info(f"🧪 Trade SIMULADO (Paper Trading)")
+            else:
+                # REAL TRADING: Ejecutar orden real
+                order = await self.exchange.create_market_order(symbol, side, quantity)
+                logger.info(f"💰 Trade REAL ejecutado")
 
             # Calcular SL y TP
             sl_pct = self.config['trading']['stop_loss_pct']
@@ -342,8 +387,16 @@ class LiveTradingBot:
                 symbol = self.config['exchange']['symbol']
                 side = 'sell' if direction == 'LONG' else 'buy'
 
-                # Cerrar en exchange
-                await self.exchange.create_market_order(symbol, side, pos['quantity'])
+                # Verificar si es paper trading
+                is_paper_trading = self.config['exchange'].get('paper_trading', True)
+
+                if is_paper_trading:
+                    # PAPER TRADING: Simular cierre
+                    logger.info(f"🧪 Cierre SIMULADO (Paper Trading)")
+                else:
+                    # REAL TRADING: Cerrar orden real
+                    await self.exchange.create_market_order(symbol, side, pos['quantity'])
+                    logger.info(f"💰 Cierre REAL ejecutado")
 
                 # Calcular P&L
                 if direction == 'LONG':
@@ -564,20 +617,56 @@ config = load_config()
 trading_config = config.get('trading', {})
 exchange_config = config.get('exchange', {})
 
-# Mostrar configuración de futuros
-leverage = trading_config.get('leverage', 1)
-margin_mode = trading_config.get('margin_mode', 'ISOLATED')
-position_size = trading_config.get('position_size_usd', 100)
+# Selector de modo de trading
+trading_mode = st.sidebar.radio(
+    "Modo de Trading",
+    ["Paper Trading (Simulado)", "Real Trading (Dinero Real)"],
+    index=0,
+    help="Paper Trading simula trades sin conectar a Binance"
+)
 
 # Indicadores visuales
-if exchange_config.get('testnet', True):
-    st.sidebar.success("🧪 Testnet (Dinero Ficticio)")
+if trading_mode == "Paper Trading (Simulado)":
+    st.sidebar.success("🧪 Paper Trading (Simulado - Sin Riesgo)")
+    is_paper_trading = True
 else:
-    st.sidebar.error("🔥 PRODUCCIÓN (Dinero Real)")
+    st.sidebar.error("🔥 REAL TRADING (Dinero Real - Ten Cuidado)")
+    is_paper_trading = False
 
+# Mostrar configuración de futuros
+st.sidebar.subheader("Parámetros de Futuros")
+
+# Leverage selector
+leverage = st.sidebar.select_slider(
+    "Apalancamiento (Leverage)",
+    options=[1, 2, 3, 5, 10, 20, 50],
+    value=trading_config.get('leverage', 1),
+    help="1x = Sin apalancamiento (más seguro), 20x = 20 veces tu capital (MUY RIESGOSO)"
+)
+
+# Margin mode selector
+margin_mode = st.sidebar.radio(
+    "Tipo de Margen",
+    ["ISOLATED", "CROSS"],
+    index=0 if trading_config.get('margin_mode', 'ISOLATED') == 'ISOLATED' else 1,
+    help="ISOLATED = solo pierdes esa posición | CROSS = puedes perder todo"
+)
+
+# Position size
+position_size = st.sidebar.number_input(
+    "Tamaño de Posición (USD)",
+    min_value=10,
+    max_value=1000,
+    value=trading_config.get('position_size_usd', 100),
+    step=10,
+    help="Cantidad en USD por cada trade"
+)
+
+# Mostrar resumen
 st.sidebar.info(f"""
 **Mercado:** Futuros (Futures)
 **Símbolo:** {exchange_config.get('symbol', 'ETHUSDT')}
+**Modo:** {"Paper (Simulado)" if is_paper_trading else "REAL"}
 **Apalancamiento:** {leverage}x
 **Margen:** {margin_mode}
 **Posición:** ${position_size} USD
@@ -585,7 +674,37 @@ st.sidebar.info(f"""
 
 # Advertencia de riesgo si leverage > 1
 if leverage > 1:
-    st.sidebar.warning(f"⚠️ Usando {leverage}x leverage. Con ${position_size} controlas ${position_size * leverage} de ETH")
+    risk_exposure = position_size * leverage
+    st.sidebar.warning(f"⚠️ RIESGO: Con {leverage}x leverage y ${position_size}, controlas ${risk_exposure} de ETH")
+
+    # Calcular precio de liquidación aproximado
+    liquidation_move = (1 / leverage) * 100
+    st.sidebar.error(f"🚨 Liquidación si ETH se mueve {liquidation_move:.1f}% en tu contra")
+
+# Guardar configuración actualizada en session_state
+if 'trading_settings' not in st.session_state:
+    st.session_state.trading_settings = {}
+
+st.session_state.trading_settings.update({
+    'leverage': leverage,
+    'margin_mode': margin_mode,
+    'position_size_usd': position_size,
+    'is_paper_trading': is_paper_trading
+})
+
+# Botón para aplicar cambios
+if st.sidebar.button("💾 Aplicar Cambios", type="primary"):
+    # Guardar en config file
+    config['trading']['leverage'] = leverage
+    config['trading']['margin_mode'] = margin_mode
+    config['trading']['position_size_usd'] = position_size
+    config['exchange']['paper_trading'] = is_paper_trading
+
+    with open('config_15min.json', 'w') as f:
+        json.dump(config, f, indent=2)
+
+    st.sidebar.success("✅ Configuración guardada!")
+    st.sidebar.info("⚠️ Reinicia el bot para aplicar cambios")
 
 # Configuración
 st.sidebar.header("📊 Parámetros de Trading")
@@ -854,7 +973,7 @@ if not df_price.empty:
     fig.update_yaxes(title_text="Precio (USDT)", row=1, col=1)
     fig.update_yaxes(title_text="P&L Acumulado (%)", row=2, col=1)
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 else:
     st.warning("⚠️ No hay datos de precio disponibles. Ejecuta primero el pipeline de entrenamiento.")
