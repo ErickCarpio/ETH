@@ -12,6 +12,14 @@ from pathlib import Path
 import time
 from datetime import datetime, timedelta
 import numpy as np
+import sys
+
+# Añadir path para importar CacheManager
+sys.path.append(str(Path(__file__).parent))
+from data.cache.cache_manager import CacheManager
+
+# Inicializar CacheManager
+cache_mgr = CacheManager()
 
 # Configuración de página
 st.set_page_config(
@@ -39,20 +47,27 @@ st.markdown("""
 
 @st.cache_data(ttl=60)
 def load_price_data(hours=24):
-    """Carga datos de precio desde cache"""
+    """Carga datos de precio desde CacheManager"""
     try:
-        cache_files = list(Path('data/cache').glob('ETHUSDT_1h_*.parquet'))
-        if cache_files:
-            latest = max(cache_files, key=lambda x: x.stat().st_mtime)
-            df = pd.read_parquet(latest)
-            df['timestamp'] = pd.to_datetime(df['timestamp'])
-            df = df.set_index('timestamp')
-            # Últimas N horas
+        # Cargar datos usando CacheManager
+        df = cache_mgr.load_data('ETHUSDT_1h')
+
+        if df is not None and not df.empty:
+            # Asegurar timestamp como índice
+            if 'timestamp' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                df = df.set_index('timestamp')
+            elif df.index.name != 'timestamp':
+                # Si ya es índice pero sin nombre, renombrar
+                df.index.name = 'timestamp'
+
+            # Filtrar últimas N horas
             cutoff = datetime.now() - timedelta(hours=hours)
             df = df[df.index >= cutoff]
             return df
     except Exception as e:
         st.error(f"Error cargando datos: {e}")
+
     return pd.DataFrame()
 
 def load_model_info():

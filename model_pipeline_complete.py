@@ -674,6 +674,9 @@ def main():
             logger.info("\n📋 Últimos 10 trades:")
             print(trade_history.tail(10).to_string(index=False))
 
+            # Guardar trades para el dashboard
+            backtester.save_trades_to_csv('logs/trades_history.csv')
+
         # Optimizar Threshold + TP/SL para maximizar win rate
         from backtesting.backtester import optimize_threshold_and_tpsl
         logger.info("\n🔍 Optimizando Threshold + TP/SL para Win Rate 50%+...")

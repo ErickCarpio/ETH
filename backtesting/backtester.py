@@ -285,6 +285,28 @@ class Backtester:
 
         print("="*70 + "\n")
 
+    def save_trades_to_csv(self, filepath: str = 'logs/trades_history.csv'):
+        """
+        Guarda los trades en un archivo CSV para el dashboard.
+
+        Args:
+            filepath: Ruta del archivo CSV
+        """
+        import os
+        from pathlib import Path
+
+        # Crear directorio logs si no existe
+        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+
+        # Obtener DataFrame de trades
+        trades_df = self.get_trades_df()
+
+        if not trades_df.empty:
+            trades_df.to_csv(filepath, index=False)
+            logger.info(f"💾 Trades guardados en: {filepath}")
+        else:
+            logger.warning("⚠️ No hay trades para guardar")
+
 
 def optimize_tp_sl(df: pd.DataFrame, predictions: np.ndarray,
                    sl_range=(0.01, 0.05), tp_range=(0.02, 0.10),
