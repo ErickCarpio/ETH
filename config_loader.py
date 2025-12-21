@@ -1,8 +1,9 @@
 """
-Config Loader - Carga y valida configuración desde YAML
+Config Loader - Carga y valida configuración desde YAML o JSON
 """
 
 import yaml
+import json
 from pathlib import Path
 from typing import Dict, Any
 import logging
@@ -14,38 +15,50 @@ logger = logging.getLogger(__name__)
 
 class ConfigLoader:
     """
-    Carga configuración desde archivo YAML y variables de entorno
-    Prioridad: ENV VARS > YAML > DEFAULTS
+    Carga configuración desde archivo YAML/JSON y variables de entorno
+    Prioridad: ENV VARS > YAML/JSON > DEFAULTS
     """
-    
+
     def __init__(self, config_path: str = "config.yaml"):
         """
         Args:
-            config_path: Ruta al archivo de configuración
+            config_path: Ruta al archivo de configuración (.yaml o .json)
         """
         self.config_path = Path(config_path)
         self.config = {}
-        
+
         if self.config_path.exists():
-            self._load_from_yaml()
+            if self.config_path.suffix in ['.json']:
+                self._load_from_json()
+            else:
+                self._load_from_yaml()
         else:
             logger.warning(f"Archivo de configuración no encontrado: {config_path}")
             logger.info("Usando configuración por defecto")
             self._load_defaults()
-        
+
         # Sobreescribir con variables de entorno
         self._override_with_env_vars()
-        
+
         # Validar configuración
         self._validate_config()
-    
+
+    def _load_from_json(self):
+        """Carga configuración desde JSON"""
+        logger.info(f"Cargando configuración desde: {self.config_path}")
+
+        with open(self.config_path, 'r') as f:
+            self.config = json.load(f)
+
+        logger.info("✓ Configuración cargada desde JSON")
+
     def _load_from_yaml(self):
         """Carga configuración desde YAML"""
         logger.info(f"Cargando configuración desde: {self.config_path}")
-        
+
         with open(self.config_path, 'r') as f:
             self.config = yaml.safe_load(f)
-        
+
         logger.info("✓ Configuración cargada desde YAML")
     
     def _load_defaults(self):
@@ -134,18 +147,21 @@ class ConfigLoader:
     def _validate_config(self):
         """Valida que la configuración sea correcta"""
         logger.info("Validando configuración...")
-        
-        # Validar capital
-        capital = self.get('risk.total_capital')
+
+        # Validar capital (soporta tanto 'risk' como 'trading')
+        capital = self.get('risk.total_capital') or self.get('trading.total_capital')
+        if capital is None:
+            logger.warning("⚠️ total_capital no configurado. Usando valor por defecto: 1000")
+            capital = 1000.0
         if capital <= 0:
             raise ValueError(f"Capital debe ser > 0, encontrado: {capital}")
-        
-        min_order = self.get('risk.min_order_value')
+
+        min_order = self.get('risk.min_order_value') or self.get('trading.min_order_value') or 20.0
         if min_order < 10:
             logger.warning(f"⚠️ Orden mínima muy baja: ${min_order}. Binance requiere ~$10-$20")
         
         # Validar que min_order no exceda capital disponible
-        grid_allocation = self.get('risk.grid_allocation')
+        grid_allocation = self.get('risk.grid_allocation') or self.get('trading.grid_allocation') or 0.8
         available = capital * grid_allocation
         
         if min_order > available:
