@@ -97,17 +97,18 @@ class LiveTradingBot:
             return False
 
     async def initialize_exchange(self):
-        """Inicializa conexión con Binance"""
+        """Inicializa conexión con Binance (Testnet, Paper Trading o Real)"""
         try:
             exchange_config = self.config['exchange']
             trading_config = self.config['trading']
 
-            # Verificar si es paper trading (simulado)
-            is_paper_trading = exchange_config.get('paper_trading', True)
+            # Determinar modo de operación
+            is_testnet = exchange_config.get('testnet', True)
+            is_paper_trading = exchange_config.get('paper_trading', False)
 
+            # MODO 1: PAPER TRADING (Simulación Local)
             if is_paper_trading:
-                # PAPER TRADING: Solo descarga datos, no ejecuta órdenes reales
-                logger.info("🧪 Modo PAPER TRADING (Simulado - Sin Riesgo)")
+                logger.info("🖥️ Modo PAPER TRADING (Simulación Local - Sin Riesgo)")
                 logger.info("   Los trades se simulan localmente sin conectar a Binance")
 
                 # Conectar solo para obtener datos de mercado (sin API keys)
@@ -123,9 +124,77 @@ class LiveTradingBot:
                 self.simulated_balance = 10000.0  # $10,000 simulados
                 logger.info(f"✓ Balance Simulado: ${self.simulated_balance:.2f}")
 
+            # MODO 2: TESTNET BINANCE (Dinero Ficticio de Binance)
+            elif is_testnet:
+                logger.info("🧪 Modo TESTNET BINANCE (Dinero Ficticio - Sin Riesgo)")
+                logger.info("   Conectando a testnet.binancefuture.com")
+
+                testnet_api_key = exchange_config.get('testnet_api_key', '').strip()
+                testnet_api_secret = exchange_config.get('testnet_api_secret', '').strip()
+
+                if not testnet_api_key or not testnet_api_secret:
+                    raise ValueError(
+                        "❌ API keys de Testnet no configuradas.\n"
+                        "   1. Ve a: https://testnet.binancefuture.com\n"
+                        "   2. API Management → Create API Key\n"
+                        "   3. Copia las keys a config_15min.json (testnet_api_key, testnet_api_secret)"
+                    )
+
+                # Configurar CCXT para usar Testnet Futures
+                self.exchange = ccxt.binance({
+                    'apiKey': testnet_api_key,
+                    'secret': testnet_api_secret,
+                    'enableRateLimit': True,
+                    'options': {'defaultType': 'future'},
+                    'urls': {
+                        'api': {
+                            'public': 'https://testnet.binancefuture.com/fapi/v1',
+                            'private': 'https://testnet.binancefuture.com/fapi/v1',
+                            'fapiPublic': 'https://testnet.binancefuture.com/fapi/v1',
+                            'fapiPrivate': 'https://testnet.binancefuture.com/fapi/v1',
+                            'fapiPublicV2': 'https://testnet.binancefuture.com/fapi/v2',
+                            'fapiPrivateV2': 'https://testnet.binancefuture.com/fapi/v2',
+                        }
+                    }
+                })
+
+                await self.exchange.load_markets()
+                logger.info("✓ Conectado a Binance Testnet")
+
+                # Configurar LEVERAGE y MARGIN MODE
+                symbol = exchange_config.get('symbol', 'ETHUSDT')
+                leverage = trading_config.get('leverage', 1)
+                margin_mode = trading_config.get('margin_mode', 'ISOLATED')
+
+                try:
+                    # Establecer modo de margen
+                    await self.exchange.fapiPrivate_post_margintype({
+                        'symbol': symbol.replace('/', ''),
+                        'marginType': margin_mode
+                    })
+                    logger.info(f"✓ Margin Mode: {margin_mode}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Margin mode ya configurado o error: {e}")
+
+                try:
+                    # Establecer apalancamiento
+                    await self.exchange.fapiPrivate_post_leverage({
+                        'symbol': symbol.replace('/', ''),
+                        'leverage': leverage
+                    })
+                    logger.info(f"✓ Leverage configurado: {leverage}x")
+                except Exception as e:
+                    logger.warning(f"⚠️ Leverage ya configurado o error: {e}")
+
+                # Verificar balance en testnet
+                balance = await self.exchange.fetch_balance()
+                usdt_balance = balance.get('USDT', {}).get('free', 0)
+                logger.info(f"✓ Balance Testnet USDT: ${usdt_balance:.2f}")
+
+            # MODO 3: REAL TRADING (Dinero Real)
             else:
-                # REAL TRADING: Conexión real con API keys
-                logger.warning("🔥 MODO REAL TRADING - Dinero Real")
+                logger.warning("🔥 MODO REAL TRADING - DINERO REAL")
+                logger.warning("⚠️ ⚠️ ⚠️  ESTÁS USANDO DINERO REAL  ⚠️ ⚠️ ⚠️")
 
                 api_key = exchange_config.get('api_key', '').strip()
                 api_secret = exchange_config.get('api_secret', '').strip()
@@ -141,6 +210,7 @@ class LiveTradingBot:
                 })
 
                 await self.exchange.load_markets()
+                logger.info("✓ Conectado a Binance PRODUCCIÓN")
 
                 # Configurar LEVERAGE y MARGIN MODE
                 symbol = exchange_config.get('symbol', 'ETHUSDT')
@@ -169,16 +239,24 @@ class LiveTradingBot:
 
                 # Verificar balance real
                 balance = await self.exchange.fetch_balance()
-                logger.info(f"✓ Balance USDT: ${balance['USDT']['free']:.2f}")
+                logger.info(f"✓ Balance REAL USDT: ${balance['USDT']['free']:.2f}")
 
             # Mostrar configuración de trading
             symbol = exchange_config.get('symbol', 'ETHUSDT')
             leverage = trading_config.get('leverage', 1)
             margin_mode = trading_config.get('margin_mode', 'ISOLATED')
 
+            # Determinar modo para display
+            if is_paper_trading:
+                mode_display = "PAPER TRADING (Simulado Local)"
+            elif is_testnet:
+                mode_display = "TESTNET BINANCE (Dinero Ficticio)"
+            else:
+                mode_display = "🔥 REAL TRADING (DINERO REAL) 🔥"
+
             logger.info("=" * 60)
             logger.info("📊 CONFIGURACIÓN DE TRADING:")
-            logger.info(f"   Modo: {'PAPER TRADING (Simulado)' if is_paper_trading else 'REAL TRADING'}")
+            logger.info(f"   Modo: {mode_display}")
             logger.info(f"   Mercado: FUTUROS (Futures)")
             logger.info(f"   Símbolo: {symbol}")
             logger.info(f"   Leverage: {leverage}x")
@@ -287,8 +365,9 @@ class LiveTradingBot:
             symbol = self.config['exchange']['symbol']
             side = 'buy' if signal == 'LONG' else 'sell'
 
-            # Verificar si es paper trading
-            is_paper_trading = self.config['exchange'].get('paper_trading', True)
+            # Determinar modo de trading
+            is_paper_trading = self.config['exchange'].get('paper_trading', False)
+            is_testnet = self.config['exchange'].get('testnet', True)
 
             if is_paper_trading:
                 # PAPER TRADING: Simular orden sin ejecutar en exchange
@@ -303,11 +382,15 @@ class LiveTradingBot:
                     'status': 'closed',
                     'timestamp': int(datetime.now().timestamp() * 1000)
                 }
-                logger.info(f"🧪 Trade SIMULADO (Paper Trading)")
-            else:
-                # REAL TRADING: Ejecutar orden real
+                logger.info(f"🖥️ Trade SIMULADO (Paper Trading Local)")
+            elif is_testnet:
+                # TESTNET: Ejecutar orden en testnet de Binance (dinero ficticio)
                 order = await self.exchange.create_market_order(symbol, side, quantity)
-                logger.info(f"💰 Trade REAL ejecutado")
+                logger.info(f"🧪 Trade TESTNET ejecutado (Dinero Ficticio)")
+            else:
+                # REAL TRADING: Ejecutar orden real con dinero real
+                order = await self.exchange.create_market_order(symbol, side, quantity)
+                logger.warning(f"🔥 Trade REAL ejecutado (DINERO REAL)")
 
             # Calcular SL y TP
             sl_pct = self.config['trading']['stop_loss_pct']
@@ -620,18 +703,27 @@ exchange_config = config.get('exchange', {})
 # Selector de modo de trading
 trading_mode = st.sidebar.radio(
     "Modo de Trading",
-    ["Paper Trading (Simulado)", "Real Trading (Dinero Real)"],
+    ["Testnet Binance (Dinero Ficticio)", "Paper Trading (Simulado Local)", "Real Trading (Dinero Real)"],
     index=0,
-    help="Paper Trading simula trades sin conectar a Binance"
+    help="Testnet = Binance real con dinero ficticio | Paper = Simulación local | Real = Dinero real"
 )
 
-# Indicadores visuales
-if trading_mode == "Paper Trading (Simulado)":
-    st.sidebar.success("🧪 Paper Trading (Simulado - Sin Riesgo)")
-    is_paper_trading = True
-else:
-    st.sidebar.error("🔥 REAL TRADING (Dinero Real - Ten Cuidado)")
+# Indicadores visuales y configuración
+if trading_mode == "Testnet Binance (Dinero Ficticio)":
+    st.sidebar.success("🧪 Testnet de Binance (Dinero Ficticio)")
     is_paper_trading = False
+    is_testnet = True
+    st.sidebar.info("Conecta a testnet.binancefuture.com con dinero ficticio de Binance")
+elif trading_mode == "Paper Trading (Simulado Local)":
+    st.sidebar.success("🖥️ Paper Trading (Simulación Local)")
+    is_paper_trading = True
+    is_testnet = False
+    st.sidebar.info("Simula trades localmente sin conectar a Binance")
+else:
+    st.sidebar.error("🔥 REAL TRADING (Dinero Real)")
+    is_paper_trading = False
+    is_testnet = False
+    st.sidebar.warning("⚠️ USA DINERO REAL - Ten mucho cuidado")
 
 # Mostrar configuración de futuros
 st.sidebar.subheader("Parámetros de Futuros")
@@ -662,15 +754,37 @@ position_size = st.sidebar.number_input(
     help="Cantidad en USD por cada trade"
 )
 
-# Mostrar resumen
+# Mostrar resumen de configuración
+mode_display = "Testnet (Ficticio)" if is_testnet and not is_paper_trading else ("Paper (Simulado)" if is_paper_trading else "REAL (Dinero Real)")
 st.sidebar.info(f"""
 **Mercado:** Futuros (Futures)
 **Símbolo:** {exchange_config.get('symbol', 'ETHUSDT')}
-**Modo:** {"Paper (Simulado)" if is_paper_trading else "REAL"}
+**Modo:** {mode_display}
 **Apalancamiento:** {leverage}x
 **Margen:** {margin_mode}
 **Posición:** ${position_size} USD
 """)
+
+# Si modo testnet, mostrar campos para API keys
+if is_testnet and not is_paper_trading:
+    st.sidebar.subheader("🔑 API Keys Testnet")
+
+    testnet_key = st.sidebar.text_input(
+        "Testnet API Key",
+        value=exchange_config.get('testnet_api_key', ''),
+        type="password",
+        help="Obtén keys en: https://testnet.binancefuture.com"
+    )
+
+    testnet_secret = st.sidebar.text_input(
+        "Testnet API Secret",
+        value=exchange_config.get('testnet_api_secret', ''),
+        type="password"
+    )
+
+    if not testnet_key or not testnet_secret:
+        st.sidebar.warning("⚠️ Configura las API keys de Testnet para operar")
+        st.sidebar.markdown("[Obtener keys de Testnet](https://testnet.binancefuture.com)")
 
 # Advertencia de riesgo si leverage > 1
 if leverage > 1:
@@ -689,7 +803,8 @@ st.session_state.trading_settings.update({
     'leverage': leverage,
     'margin_mode': margin_mode,
     'position_size_usd': position_size,
-    'is_paper_trading': is_paper_trading
+    'is_paper_trading': is_paper_trading,
+    'is_testnet': is_testnet
 })
 
 # Botón para aplicar cambios
@@ -699,6 +814,12 @@ if st.sidebar.button("💾 Aplicar Cambios", type="primary"):
     config['trading']['margin_mode'] = margin_mode
     config['trading']['position_size_usd'] = position_size
     config['exchange']['paper_trading'] = is_paper_trading
+    config['exchange']['testnet'] = is_testnet
+
+    # Si es testnet, guardar API keys
+    if is_testnet and not is_paper_trading:
+        config['exchange']['testnet_api_key'] = testnet_key
+        config['exchange']['testnet_api_secret'] = testnet_secret
 
     with open('config_15min.json', 'w') as f:
         json.dump(config, f, indent=2)

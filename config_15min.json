@@ -6,10 +6,17 @@
   "exchange": {
     "name": "binance",
     "symbol": "ETHUSDT",
-    "paper_trading": true,
-    "_paper_trading_help": "true = Simulado (sin riesgo) | false = Real (dinero real)",
+    "testnet": true,
+    "_testnet_help": "true = Testnet Binance (dinero ficticio) | false = Producción (dinero real)",
+    "paper_trading": false,
+    "_paper_trading_help": "true = Simulación local (sin conexión) | false = Conectar a exchange",
 
-    "_comment": "--- PRODUCCIÓN (Binance.com) - Solo si paper_trading = false ---",
+    "_comment": "--- TESTNET (testnet.binancefuture.com) - Dinero Ficticio ---",
+    "testnet_api_key": "",
+    "testnet_api_secret": "",
+    "_testnet_comment": "Obtén keys en: https://testnet.binancefuture.com",
+
+    "_comment": "--- PRODUCCIÓN (Binance.com) - Solo si testnet = false ---",
     "api_key": "zkWNnqvkhJg7BJRYL0OoFlaWAWh2gHpcpSJH9SUU3UCHcDs7pw0FqSOvaeaNYPEf",
     "api_secret": "2Tub8roQHafYMZNBOmYgfRG6afHOc9C9a7oMwG4r9NthqTnVsfNpLnViEn74qog5"
   },
