@@ -82,8 +82,8 @@ def load_trades_history():
 
     # Datos de ejemplo para visualización
     return pd.DataFrame({
-        'entry_time': pd.date_range(end=datetime.now(), periods=10, freq='6H'),
-        'exit_time': pd.date_range(end=datetime.now(), periods=10, freq='6H') + pd.Timedelta(hours=2),
+        'entry_time': pd.date_range(end=datetime.now(), periods=10, freq='6h'),
+        'exit_time': pd.date_range(end=datetime.now(), periods=10, freq='6h') + pd.Timedelta(hours=2),
         'direction': ['LONG', 'SHORT'] * 5,
         'entry_price': [3500, 3520, 3480, 3510, 3490, 3505, 3515, 3495, 3500, 3510],
         'exit_price': [3550, 3500, 3530, 3490, 3540, 3485, 3565, 3480, 3550, 3500],
@@ -110,11 +110,11 @@ bot_status.success("🟢 Bot Iniciado" if st.session_state.get('bot_running', Fa
 
 # Controles
 col1, col2 = st.sidebar.columns(2)
-if col1.button("▶️ Iniciar", use_container_width=True):
+if col1.button("▶️ Iniciar", width="stretch"):
     st.session_state['bot_running'] = True
     st.rerun()
 
-if col2.button("⏸️ Detener", use_container_width=True):
+if col2.button("⏸️ Detener", width="stretch"):
     st.session_state['bot_running'] = False
     st.rerun()
 
@@ -385,7 +385,7 @@ if not trades_df.empty:
 
     st.dataframe(
         display_df,
-        use_container_width=True,
+        width="stretch",
         height=400
     )
 else:
@@ -399,33 +399,47 @@ with col1:
     st.header("📊 Estadísticas de Trading")
 
     if not trades_df.empty:
-        stats_data = {
-            'Total Trades': [total_trades],
-            'Wins': [wins],
-            'Losses': [losses],
-            'Win Rate': [f"{win_rate:.1f}%"],
-            'Avg Win': [f"{trades_df[trades_df['pnl_pct'] > 0]['pnl_pct'].mean():.2f}%"],
-            'Avg Loss': [f"{trades_df[trades_df['pnl_pct'] < 0]['pnl_pct'].mean():.2f}%"],
-            'Best Trade': [f"{trades_df['pnl_pct'].max():.2f}%"],
-            'Worst Trade': [f"{trades_df['pnl_pct'].min():.2f}%"],
-            'Profit Factor': [f"{profit_factor:.2f}"]
-        }
+        # Keep data as numbers, format in display
+        avg_win = trades_df[trades_df['pnl_pct'] > 0]['pnl_pct'].mean()
+        avg_loss = trades_df[trades_df['pnl_pct'] < 0]['pnl_pct'].mean()
+        best_trade = trades_df['pnl_pct'].max()
+        worst_trade = trades_df['pnl_pct'].min()
 
-        st.table(pd.DataFrame(stats_data).T.rename(columns={0: 'Valor'}))
+        # Create DataFrame with formatted strings only
+        stats_display = pd.DataFrame({
+            'Métrica': ['Total Trades', 'Wins', 'Losses', 'Win Rate', 'Avg Win', 'Avg Loss', 'Best Trade', 'Worst Trade', 'Profit Factor'],
+            'Valor': [
+                str(total_trades),
+                str(wins),
+                str(losses),
+                f"{win_rate:.1f}%",
+                f"{avg_win:.2f}%",
+                f"{avg_loss:.2f}%",
+                f"{best_trade:.2f}%",
+                f"{worst_trade:.2f}%",
+                f"{profit_factor:.2f}"
+            ]
+        })
+
+        st.table(stats_display.set_index('Métrica'))
 
 with col2:
     st.header("⚙️ Configuración Actual")
 
-    config_data = {
-        'Threshold': [f"{threshold:.0%}"],
-        'Stop Loss': [f"{sl_pct:.1%}"],
-        'Take Profit': [f"{tp_pct:.1%}"],
-        'Timeframe': ['1 hora'],
-        'Max Positions': [config.get('trading', {}).get('max_positions', 1)],
-        'Position Size': [f"${config.get('trading', {}).get('position_size_usd', 100)}"]
-    }
+    # Create DataFrame with formatted strings only
+    config_display = pd.DataFrame({
+        'Parámetro': ['Threshold', 'Stop Loss', 'Take Profit', 'Timeframe', 'Max Positions', 'Position Size'],
+        'Valor': [
+            f"{threshold:.0%}",
+            f"{sl_pct:.1%}",
+            f"{tp_pct:.1%}",
+            '1 hora',
+            str(config.get('trading', {}).get('max_positions', 1)),
+            f"${config.get('trading', {}).get('position_size_usd', 100)}"
+        ]
+    })
 
-    st.table(pd.DataFrame(config_data).T.rename(columns={0: 'Valor'}))
+    st.table(config_display.set_index('Parámetro'))
 
 # =================== FOOTER ===================
 
