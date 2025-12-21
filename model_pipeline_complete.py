@@ -699,6 +699,100 @@ def main():
             logger.info(f"   Trades: {optimization['best_stats']['total_trades']}")
             logger.info(f"   Profit Factor: {optimization['best_stats']['profit_factor']:.2f}")
 
+        # Visualización de trades
+        logger.info("\n📊 Generando visualización de trades...")
+        try:
+            import matplotlib
+            matplotlib.use('Agg')  # Backend sin GUI
+            import matplotlib.pyplot as plt
+            import matplotlib.dates as mdates
+
+            def plot_backtest_trades(df_ohlcv, trades_df, save_path='backtest_results.png'):
+                """Visualiza trades en gráfico de precio"""
+                if trades_df.empty:
+                    logger.warning("No hay trades para graficar")
+                    return
+
+                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(18, 10), height_ratios=[3, 1])
+
+                # === Panel 1: Precio + Trades ===
+                ax1.plot(df_ohlcv.index, df_ohlcv['close'], label='Precio Close',
+                         color='#2E86C1', linewidth=1.5, alpha=0.8)
+
+                # Plot cada trade
+                for idx, trade in trades_df.iterrows():
+                    entry_t = trade['entry_time']
+                    exit_t = trade['exit_time']
+                    entry_p = trade['entry_price']
+                    exit_p = trade['exit_price']
+                    direction = trade['direction']
+                    pnl_pct = trade['pnl_pct']
+
+                    # Colores y markers
+                    is_win = pnl_pct > 0
+                    color = '#27AE60' if is_win else '#E74C3C'  # Verde/Rojo
+                    entry_marker = '^' if direction == 'LONG' else 'v'
+                    exit_marker = 'v' if direction == 'LONG' else '^'
+
+                    # Entrada
+                    ax1.scatter(entry_t, entry_p, color=color, marker=entry_marker,
+                               s=150, alpha=0.8, edgecolors='white', linewidths=2, zorder=10)
+
+                    # Salida
+                    ax1.scatter(exit_t, exit_p, color=color, marker=exit_marker,
+                               s=150, alpha=0.8, edgecolors='white', linewidths=2, zorder=10)
+
+                    # Línea trade
+                    ax1.plot([entry_t, exit_t], [entry_p, exit_p],
+                            color=color, linestyle='--', alpha=0.4, linewidth=1.5)
+
+                    # Label P&L
+                    mid_t = entry_t + (exit_t - entry_t) / 2
+                    mid_p = max(entry_p, exit_p) * 1.005
+                    ax1.text(mid_t, mid_p, f'{pnl_pct:+.1f}%',
+                            fontsize=8, color=color, weight='bold', ha='center',
+                            bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+
+                ax1.set_title('📊 Backtest Results - ETH/USDT 1H', fontsize=16, weight='bold', pad=20)
+                ax1.set_ylabel('Precio (USDT)', fontsize=12, weight='bold')
+                ax1.legend(['Precio', '▲ LONG Win', '▼ SHORT Win'],
+                          loc='upper left', fontsize=10)
+                ax1.grid(True, alpha=0.3, linestyle='--')
+
+                # === Panel 2: Curva de P&L Acumulado ===
+                trades_sorted = trades_df.sort_values('exit_time')
+                cumulative_pnl = trades_sorted['pnl'].cumsum()
+
+                ax2.plot(trades_sorted['exit_time'], cumulative_pnl,
+                        color='#16A085', linewidth=2, label='P&L Acumulado')
+                ax2.fill_between(trades_sorted['exit_time'], cumulative_pnl, 0,
+                                 alpha=0.3, color='#16A085')
+                ax2.axhline(y=0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
+
+                ax2.set_xlabel('Fecha', fontsize=12, weight='bold')
+                ax2.set_ylabel('P&L ($)', fontsize=12, weight='bold')
+                ax2.legend(loc='upper left', fontsize=10)
+                ax2.grid(True, alpha=0.3, linestyle='--')
+
+                # Formato de fechas
+                for ax in [ax1, ax2]:
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+                    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+
+                plt.tight_layout()
+                plt.savefig(save_path, dpi=200, bbox_inches='tight')
+                plt.close()
+
+                logger.info(f"   ✓ Gráfico guardado: {save_path}")
+                print(f"\n📊 Gráfico de trades guardado en: {save_path}")
+
+            # Generar gráfico
+            if not trade_history.empty:
+                plot_backtest_trades(df_val_ohlcv, trade_history)
+
+        except Exception as e:
+            logger.warning(f"   ⚠️ Error generando gráfico: {e}")
+
     else:
         logger.warning("   ⚠️ No se pueden ejecutar backtests (faltan columnas OHLCV)")
 
