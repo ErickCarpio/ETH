@@ -160,13 +160,21 @@ class TradingSystemOrchestrator:
             coinglass_df=dataset.get('coinglass')
         )
         
-        # Etiquetar régimen
-        logger.info("\n3. Etiquetando régimen de mercado...")
-        labeled_df = self.regime_labeler.label_regime(features_df)
-        
-        self.current_dataset = labeled_df
+        # Etiquetar régimen (solo si se va a entrenar, skip si modelo existe)
+        from pathlib import Path
+        model_path = Path('models/xgboost_model.json')
+
+        if model_path.exists():
+            logger.info("\n3. ✓ Modelo existente encontrado - Saltando etiquetado de régimen")
+            logger.info(f"   Modelo: {model_path}")
+            self.current_dataset = features_df
+        else:
+            logger.info("\n3. Etiquetando régimen de mercado (primera vez)...")
+            labeled_df = self.regime_labeler.label_regime(features_df)
+            self.current_dataset = labeled_df
+
         self.is_initialized = True
-        
+
         logger.info("\n✓ Sistema inicializado correctamente")
         logger.info(f"Dataset shape: {self.current_dataset.shape}")
         logger.info(f"Fecha más reciente: {self.current_dataset.index[-1]}")
