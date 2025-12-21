@@ -27,6 +27,9 @@ from data.cache.cache_manager import CacheManager
 cache_mgr = CacheManager()
 
 # Configurar logging
+from pathlib import Path
+Path('logs').mkdir(exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -736,16 +739,29 @@ if not df_price.empty:
         # Línea en 0
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=2, col=1)
 
-    # Layout
+    # Layout con mejor zoom
     fig.update_layout(
         height=800,
         showlegend=True,
         hovermode='x unified',
         xaxis_rangeslider_visible=False,
-        template='plotly_white'
+        template='plotly_white',
+        xaxis_type='date'
     )
 
-    fig.update_xaxes(title_text="Fecha", row=2, col=1)
+    # Configurar zoom para que se adapte al timeframe seleccionado
+    if not df_price.empty:
+        fig.update_xaxes(
+            title_text="Fecha",
+            range=[df_price.index.min(), df_price.index.max()],
+            row=1, col=1
+        )
+        fig.update_xaxes(
+            title_text="Fecha",
+            range=[df_price.index.min(), df_price.index.max()],
+            row=2, col=1
+        )
+
     fig.update_yaxes(title_text="Precio (USDT)", row=1, col=1)
     fig.update_yaxes(title_text="P&L Acumulado (%)", row=2, col=1)
 
@@ -767,25 +783,58 @@ if st.session_state.get('bot_running', False):
     else:
         st.info("🤖 Bot operando en vivo - Esperando señal de trading...")
 
-if not trades_df.empty and 'exit_time' in trades_df.columns:
+if not trades_df.empty and 'entry_time' in trades_df.columns:
     # Formatear DataFrame para mostrar
     display_df = trades_df.copy()
-    display_df['entry_time'] = pd.to_datetime(display_df['entry_time']).dt.strftime('%Y-%m-%d %H:%M')
 
-    # Solo formatear exit_time si existe y no es nulo
+    # Seleccionar solo las columnas que queremos mostrar (en orden)
+    display_cols = []
+    if 'entry_time' in display_df.columns:
+        display_df['entry_time'] = pd.to_datetime(display_df['entry_time']).dt.strftime('%Y-%m-%d %H:%M')
+        display_cols.append('entry_time')
+
     if 'exit_time' in display_df.columns:
         display_df['exit_time'] = pd.to_datetime(display_df['exit_time'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M')
+        display_cols.append('exit_time')
 
-    display_df['entry_price'] = display_df['entry_price'].apply(lambda x: f"${x:.2f}")
+    if 'direction' in display_df.columns:
+        display_cols.append('direction')
+
+    if 'entry_price' in display_df.columns:
+        display_df['entry_price'] = display_df['entry_price'].apply(lambda x: f"${x:.2f}")
+        display_cols.append('entry_price')
 
     if 'exit_price' in display_df.columns:
         display_df['exit_price'] = display_df['exit_price'].apply(lambda x: f"${x:.2f}" if pd.notna(x) else "N/A")
+        display_cols.append('exit_price')
 
     if 'pnl_pct' in display_df.columns:
         display_df['pnl_pct'] = display_df['pnl_pct'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "N/A")
+        display_cols.append('pnl_pct')
 
-    # Renombrar columnas
-    display_df.columns = ['Entrada', 'Salida', 'Dirección', 'Precio Entrada', 'Precio Salida', 'P&L %', 'Razón']
+    if 'exit_reason' in display_df.columns:
+        display_cols.append('exit_reason')
+
+    # Añadir confianza si existe (útil para debugging)
+    if 'confidence' in display_df.columns:
+        display_df['confidence'] = display_df['confidence'].apply(lambda x: f"{x:.1%}" if pd.notna(x) else "N/A")
+        display_cols.append('confidence')
+
+    # Seleccionar solo las columnas disponibles
+    display_df = display_df[display_cols]
+
+    # Renombrar columnas dinámicamente
+    column_mapping = {
+        'entry_time': 'Entrada',
+        'exit_time': 'Salida',
+        'direction': 'Dirección',
+        'entry_price': 'Precio Entrada',
+        'exit_price': 'Precio Salida',
+        'pnl_pct': 'P&L %',
+        'exit_reason': 'Razón',
+        'confidence': 'Confianza'
+    }
+    display_df = display_df.rename(columns=column_mapping)
 
     st.dataframe(
         display_df,
