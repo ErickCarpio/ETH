@@ -165,12 +165,23 @@ tp_pct = st.sidebar.slider(
 
 # Timeframe selector
 st.sidebar.header("⏱️ Timeframe")
-hours_to_show = st.sidebar.selectbox(
+timeframe_options = {
+    "6 horas": 6,
+    "12 horas": 12,
+    "1 día": 24,
+    "2 días": 48,
+    "1 semana": 168,
+    "2 semanas": 336,
+    "1 mes": 720,
+    "3 meses": 2160,
+    "Todo": 999999
+}
+selected_tf = st.sidebar.selectbox(
     "Mostrar últimas:",
-    [6, 12, 24, 48, 72, 168],
-    index=2,
-    format_func=lambda x: f"{x} horas" if x < 168 else f"{x//24} días"
+    list(timeframe_options.keys()),
+    index=2
 )
+hours_to_show = timeframe_options[selected_tf]
 
 # Auto-refresh
 auto_refresh = st.sidebar.checkbox("🔄 Auto-actualizar", value=True)
