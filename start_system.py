@@ -172,8 +172,8 @@ def main():
     parser.add_argument(
         '--config',
         type=str,
-        default='config.yaml',
-        help='Ruta al archivo de configuración (default: config.yaml)'
+        default='config_15min.json',
+        help='Ruta al archivo de configuración (default: config_15min.json)'
     )
     
     parser.add_argument(

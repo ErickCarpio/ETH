@@ -111,7 +111,14 @@ class RegimeLabeler:
         df_filtered_len = len(df)
 
         logger.info(f"✂️ Filtrado: {df_original_len} velas → {df_filtered_len} oportunidades claras")
-        logger.info(f"   Descartadas: {df_original_len - df_filtered_len} velas laterales/inciertas ({(df_original_len - df_filtered_len)/df_original_len*100:.1f}%)")
+        if df_original_len > 0:
+            logger.info(f"   Descartadas: {df_original_len - df_filtered_len} velas laterales/inciertas ({(df_original_len - df_filtered_len)/df_original_len*100:.1f}%)")
+
+        # Verificar que haya datos
+        if df_filtered_len == 0:
+            logger.error("❌ No hay datos después del filtrado. Verifica que el cache tenga datos históricos.")
+            logger.error("   Ejecuta: python model_pipeline_complete.py primero para generar datos.")
+            raise ValueError("No hay datos para entrenar. Cache vacío.")
 
         # Convertir regime a int
         df['regime'] = df['regime'].astype(int)
