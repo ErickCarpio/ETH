@@ -254,12 +254,16 @@ class ConfigLoader:
         logger.info(f"  API Key: {'✓ Configurada' if self.get('exchange.api_key') else '✗ Faltante'}")
         
         logger.info(f"\n💰 RIESGO:")
-        logger.info(f"  Capital Total: ${self.get('risk.total_capital'):.2f}")
-        logger.info(f"  Grid Allocation: {self.get('risk.grid_allocation')*100:.0f}%")
-        logger.info(f"  Min Order Value: ${self.get('risk.min_order_value'):.2f}")
-        
+        capital = self.get('risk.total_capital') or self.get('trading.total_capital') or 1000.0
+        logger.info(f"  Capital Total: ${capital:.2f}")
+        grid_alloc = self.get('risk.grid_allocation') or self.get('trading.grid_allocation') or 0.8
+        logger.info(f"  Grid Allocation: {grid_alloc*100:.0f}%")
+        min_order = self.get('risk.min_order_value') or self.get('trading.min_order_value') or 20.0
+        logger.info(f"  Min Order Value: ${min_order:.2f}")
+
         logger.info(f"\n📈 DATOS:")
-        logger.info(f"  Ventana: {self.get('data.window_years')} años")
+        window = self.get('data.window_years') or 2
+        logger.info(f"  Ventana: {window} años")
         logger.info(f"  On-Chain: {'✓ Habilitado' if self.get('data.include_onchain') else '✗ Deshabilitado'}")
         logger.info(f"  Sentiment: {'✓ Habilitado' if self.get('data.include_sentiment') else '✗ Deshabilitado'}")
         
