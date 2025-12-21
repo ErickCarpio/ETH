@@ -100,6 +100,7 @@ class LiveTradingBot:
         """Inicializa conexión con Binance"""
         try:
             exchange_config = self.config['exchange']
+            trading_config = self.config['trading']
 
             # Usar credenciales de testnet
             api_key = exchange_config.get('testnet_api_key', '').strip()
@@ -119,8 +120,49 @@ class LiveTradingBot:
                 logger.warning("🔥 MODO PRODUCCIÓN - Dinero Real")
 
             await self.exchange.load_markets()
+
+            # Configurar LEVERAGE y MARGIN MODE
+            symbol = exchange_config.get('symbol', 'ETHUSDT')
+            leverage = trading_config.get('leverage', 1)
+            margin_mode = trading_config.get('margin_mode', 'ISOLATED')
+
+            try:
+                # Establecer modo de margen (ISOLATED o CROSS)
+                await self.exchange.fapiPrivate_post_margintype({
+                    'symbol': symbol.replace('/', ''),
+                    'marginType': margin_mode
+                })
+                logger.info(f"✓ Margin Mode: {margin_mode}")
+            except Exception as e:
+                logger.warning(f"⚠️ No se pudo establecer margin mode (puede que ya esté configurado): {e}")
+
+            try:
+                # Establecer apalancamiento
+                await self.exchange.fapiPrivate_post_leverage({
+                    'symbol': symbol.replace('/', ''),
+                    'leverage': leverage
+                })
+                logger.info(f"✓ Leverage configurado: {leverage}x")
+            except Exception as e:
+                logger.warning(f"⚠️ No se pudo establecer leverage: {e}")
+
+            # Verificar balance
             balance = await self.exchange.fetch_balance()
             logger.info(f"✓ Balance USDT: ${balance['USDT']['free']:.2f}")
+
+            # Mostrar configuración de trading
+            logger.info("=" * 50)
+            logger.info("📊 CONFIGURACIÓN DE TRADING:")
+            logger.info(f"   Mercado: FUTUROS (Futures)")
+            logger.info(f"   Símbolo: {symbol}")
+            logger.info(f"   Leverage: {leverage}x")
+            logger.info(f"   Margin Mode: {margin_mode}")
+            logger.info(f"   Tamaño por posición: ${trading_config.get('position_size_usd', 100)} USD")
+            logger.info(f"   Stop Loss: {trading_config.get('stop_loss_pct', 0.02) * 100:.1f}%")
+            logger.info(f"   Take Profit: {trading_config.get('take_profit_pct', 0.05) * 100:.1f}%")
+            logger.info(f"   Threshold: {trading_config.get('prediction_threshold', 0.70) * 100:.0f}%")
+            logger.info("=" * 50)
+
             return True
 
         except Exception as e:
@@ -233,6 +275,11 @@ class LiveTradingBot:
                 stop_loss = current_price * (1 + sl_pct)
                 take_profit = current_price * (1 - tp_pct)
 
+            # Calcular valores exactos
+            leverage = self.config['trading'].get('leverage', 1)
+            notional_value = position_size_usd * leverage  # Valor nocional con leverage
+            eth_value = quantity * current_price  # Valor en ETH
+
             trade_record = {
                 'entry_time': datetime.now(),
                 'direction': signal,
@@ -246,7 +293,21 @@ class LiveTradingBot:
             }
 
             self.current_position = trade_record
-            logger.info(f"✅ Trade ejecutado: {signal} {quantity:.4f} ETH @ ${current_price:.2f}")
+
+            # Logs detallados
+            logger.info("=" * 60)
+            logger.info("🚀 TRADE EJECUTADO")
+            logger.info(f"   Dirección: {signal}")
+            logger.info(f"   Precio: ${current_price:.2f}")
+            logger.info(f"   Cantidad ETH: {quantity:.4f}")
+            logger.info(f"   Margen usado: ${position_size_usd:.2f}")
+            logger.info(f"   Leverage: {leverage}x")
+            logger.info(f"   Valor nocional: ${notional_value:.2f} (controlando ${eth_value:.2f} de ETH)")
+            logger.info(f"   Stop Loss: ${stop_loss:.2f} ({sl_pct*100:.1f}%)")
+            logger.info(f"   Take Profit: ${take_profit:.2f} ({tp_pct*100:.1f}%)")
+            logger.info(f"   Confianza ML: {confidence:.1%}")
+            logger.info(f"   Order ID: {order['id']}")
+            logger.info("=" * 60)
 
             return trade_record
 
@@ -497,9 +558,37 @@ if col2.button("⏸️ Detener", width="stretch"):
     stop_trading_bot()
     st.rerun()
 
-# Configuración
-st.sidebar.header("📊 Configuración")
+# Información de Futuros
+st.sidebar.header("⚙️ Configuración Futuros")
 config = load_config()
+trading_config = config.get('trading', {})
+exchange_config = config.get('exchange', {})
+
+# Mostrar configuración de futuros
+leverage = trading_config.get('leverage', 1)
+margin_mode = trading_config.get('margin_mode', 'ISOLATED')
+position_size = trading_config.get('position_size_usd', 100)
+
+# Indicadores visuales
+if exchange_config.get('testnet', True):
+    st.sidebar.success("🧪 Testnet (Dinero Ficticio)")
+else:
+    st.sidebar.error("🔥 PRODUCCIÓN (Dinero Real)")
+
+st.sidebar.info(f"""
+**Mercado:** Futuros (Futures)
+**Símbolo:** {exchange_config.get('symbol', 'ETHUSDT')}
+**Apalancamiento:** {leverage}x
+**Margen:** {margin_mode}
+**Posición:** ${position_size} USD
+""")
+
+# Advertencia de riesgo si leverage > 1
+if leverage > 1:
+    st.sidebar.warning(f"⚠️ Usando {leverage}x leverage. Con ${position_size} controlas ${position_size * leverage} de ETH")
+
+# Configuración
+st.sidebar.header("📊 Parámetros de Trading")
 
 threshold = st.sidebar.slider(
     "Threshold de Confianza",

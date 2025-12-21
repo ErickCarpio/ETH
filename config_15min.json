@@ -31,6 +31,12 @@
     "stop_loss_pct": 0.02,
     "take_profit_pct": 0.05,
 
+    "_comment_futures": "Configuración FUTUROS (muy importante)",
+    "leverage": 1,
+    "_leverage_help": "1x = sin apalancamiento, 5x = 5 veces, 20x = 20 veces (MUY RIESGOSO)",
+    "margin_mode": "ISOLATED",
+    "_margin_help": "ISOLATED = solo pierdes el margen de esa posición | CROSS = puedes perder todo",
+
     "_comment_grid": "Configuración Grid Trading",
     "min_grid_spacing": 0.005,
     "max_grid_spacing": 0.03,
