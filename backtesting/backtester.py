@@ -299,7 +299,7 @@ class Backtester:
         Path(filepath).parent.mkdir(parents=True, exist_ok=True)
 
         # Obtener DataFrame de trades
-        trades_df = self.get_trades_df()
+        trades_df = self.get_trade_history()
 
         if not trades_df.empty:
             trades_df.to_csv(filepath, index=False)
