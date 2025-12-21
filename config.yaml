@@ -1,0 +1,27 @@
+# Configuración del Sistema de Trading
+# ETH/USDT - 1H Timeframe
+
+exchange:
+  name: binance
+  symbol: ETH/USDT
+  testnet: true
+  api_key: "0wovgYaYitaQX5RWFr2hmegDsvtoPFMEMI2IMy8nx91HrxrR7y5GyPXZqSTGDMQA"
+  secret: "wBiMJGFDaf84eE45eUJFOh56y8zCa39RBGpZaRikEY3ykQbw0oPWvxtDca4gjPVl"
+
+risk:
+  total_capital: 1000.0
+  grid_allocation: 0.80
+  min_order_value: 20.0
+
+data:
+  window_years: 2
+  include_onchain: true
+  include_sentiment: true
+
+model:
+  optuna_trials: 1000
+  model_dir: ./models
+
+dev:
+  use_simulated_data: false
+  paper_trading: true
