@@ -300,22 +300,34 @@ class LiveTradingBot:
     async def fetch_live_data(self, symbol='ETHUSDT', timeframe='1h', limit=350):
         """Obtiene datos en vivo de Binance (350 candles para statistical features)"""
         try:
+            # Descargar datos de 1h para trading
             ohlcv = await self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             df.set_index('timestamp', inplace=True)
-            return df
+
+            # Descargar datos de 4h para macro features
+            ohlcv_4h = await self.exchange.fetch_ohlcv(symbol, '4h', limit=200)
+            df_4h = pd.DataFrame(ohlcv_4h, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df_4h['timestamp'] = pd.to_datetime(df_4h['timestamp'], unit='ms')
+            df_4h.set_index('timestamp', inplace=True)
+
+            return df, df_4h
         except Exception as e:
             logger.error(f"Error fetching data: {e}")
-            return pd.DataFrame()
+            return pd.DataFrame(), pd.DataFrame()
 
-    def calculate_features(self, df):
+    def calculate_features(self, df, df_4h=None):
         """Calcula features completos usando el FeatureEngineer"""
         try:
             # 1. Features técnicas de precio (usando FeatureEngineer)
             # IMPORTANTE: Usar '15m' para que genere nombres correctos de features
             # (volatility_1h, volatility_6h, etc.) que el modelo espera
             df = self.feature_engineer.create_technical_features(df, timeframe='15m')
+
+            # 1a. Features de 4h (macro trend context)
+            if df_4h is not None and not df_4h.empty:
+                df = self.feature_engineer.add_4h_macro_features(df, df_4h)
 
             # 1b. Features estadísticas (Hurst, Wavelet, FFT, Entropy, etc.)
             if hasattr(self.feature_engineer, 'statistical_engine') and self.feature_engineer.statistical_engine:
@@ -379,9 +391,9 @@ class LiveTradingBot:
             # Tomar última fila con features
             latest = df.iloc[-1:].copy()
 
-            # Seleccionar features que el modelo espera (ajustar según tu modelo real)
-            feature_cols = [col for col in latest.columns if col not in ['open', 'high', 'low', 'close', 'volume']]
-            X = latest[feature_cols]
+            # El modelo necesita TODAS las columnas (incluyendo OHLCV)
+            # NO filtrar ninguna columna, el modelo espera todas las features
+            X = latest
 
             # Predicción
             pred_class = self.model.predict(X)[0]
@@ -583,16 +595,16 @@ class LiveTradingBot:
         # Loop principal
         while self.is_running:
             try:
-                # Obtener datos en vivo
-                df = await self.fetch_live_data()
+                # Obtener datos en vivo (1h y 4h)
+                df, df_4h = await self.fetch_live_data()
 
                 if df.empty:
                     logger.warning("No hay datos disponibles")
                     await asyncio.sleep(60)
                     continue
 
-                # Calcular features
-                df = self.calculate_features(df)
+                # Calcular features (pasando datos de 4h para macro features)
+                df = self.calculate_features(df, df_4h)
                 current_price = df['close'].iloc[-1]
 
                 # Verificar posición actual
