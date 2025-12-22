@@ -55,7 +55,6 @@ async def verificar_conexion_testnet():
             'enableRateLimit': True,
             'options': {
                 'defaultType': 'future',
-                'loadCurrencies': False,  # Evitar llamadas SAPI
             },
             'urls': {
                 'api': {
@@ -66,21 +65,11 @@ async def verificar_conexion_testnet():
                     'fapiPrivate': 'https://demo-fapi.binance.com/fapi/v1',
                     'fapiPublicV2': 'https://demo-fapi.binance.com/fapi/v2',
                     'fapiPrivateV2': 'https://demo-fapi.binance.com/fapi/v2',
-                    # Spot/SAPI endpoints también redirigir para evitar errores
-                    'v1': 'https://demo-fapi.binance.com/fapi/v1',
-                    'v3': 'https://demo-fapi.binance.com/fapi/v1',
-                    'sapi': 'https://demo-fapi.binance.com/fapi/v1',
-                    'sapiV1': 'https://demo-fapi.binance.com/fapi/v1',
-                    'sapiV2': 'https://demo-fapi.binance.com/fapi/v1',
                 }
             }
         })
 
-        print("   Cargando mercados...")
-        await exchange.load_markets()
-        print("   ✓ Mercados cargados")
-
-        print("   Obteniendo balance...")
+        print("   Conectando y obteniendo balance...")
         balance = await exchange.fetch_balance()
 
         usdt_balance = balance.get('USDT', {})
@@ -147,7 +136,6 @@ async def verificar_conexion_testnet():
             'enableRateLimit': True,
             'options': {
                 'defaultType': 'future',
-                'loadCurrencies': False,  # Evitar llamadas SAPI
             },
             'urls': {
                 'api': {
@@ -157,21 +145,11 @@ async def verificar_conexion_testnet():
                     'fapiPrivate': 'https://testnet.binancefuture.com/fapi/v1',
                     'fapiPublicV2': 'https://testnet.binancefuture.com/fapi/v2',
                     'fapiPrivateV2': 'https://testnet.binancefuture.com/fapi/v2',
-                    # Spot/SAPI endpoints redirigir
-                    'v1': 'https://testnet.binancefuture.com/fapi/v1',
-                    'v3': 'https://testnet.binancefuture.com/fapi/v1',
-                    'sapi': 'https://testnet.binancefuture.com/fapi/v1',
-                    'sapiV1': 'https://testnet.binancefuture.com/fapi/v1',
-                    'sapiV2': 'https://testnet.binancefuture.com/fapi/v1',
                 }
             }
         })
 
-        print("   Cargando mercados...")
-        await exchange2.load_markets()
-        print("   ✓ Mercados cargados")
-
-        print("   Obteniendo balance...")
+        print("   Conectando y obteniendo balance...")
         balance = await exchange2.fetch_balance()
 
         usdt_balance = balance.get('USDT', {})
