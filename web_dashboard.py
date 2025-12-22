@@ -317,30 +317,51 @@ class LiveTradingBot:
             # (volatility_1h, volatility_6h, etc.) que el modelo espera
             df = self.feature_engineer.create_technical_features(df, timeframe='15m')
 
+            # 1b. Features estadísticas (Hurst, Wavelet, FFT, Entropy, etc.)
+            if hasattr(self.feature_engineer, 'statistical_engine') and self.feature_engineer.statistical_engine:
+                try:
+                    logger.debug("📊 Generando statistical features...")
+                    df = self.feature_engineer.statistical_engine.add_all_features(df)
+                    logger.debug(f"   ✓ Statistical features: {len(df.columns)} columnas totales")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error generando statistical features: {e}")
+
             # 2. Cargar datos adicionales (derivatives, sentiment, macro)
             # Estos son datos históricos que se actualizan periódicamente
             try:
+                logger.debug(f"📊 Features antes de merge: {len(df.columns)} columnas")
+
                 # Derivatives (funding rate, OI, etc.)
                 derivatives_df = pd.read_parquet('data/coinglass_ETH_USDT.parquet')
+                logger.debug(f"📊 Derivatives: {len(derivatives_df)} filas")
                 if not derivatives_df.empty and 'timestamp' in derivatives_df.columns:
                     derivatives_df['timestamp'] = pd.to_datetime(derivatives_df['timestamp'])
                     df = df.merge(derivatives_df, on='timestamp', how='left', suffixes=('', '_deriv'))
+                    logger.debug(f"   ✓ Merge derivatives: {len(df.columns)} columnas")
 
                 # Sentiment
                 sentiment_df = pd.read_parquet('data/sentiment_ETH_USDT.parquet')
+                logger.debug(f"📊 Sentiment: {len(sentiment_df)} filas")
                 if not sentiment_df.empty and 'timestamp' in sentiment_df.columns:
                     sentiment_df['timestamp'] = pd.to_datetime(sentiment_df['timestamp'])
                     df = df.merge(sentiment_df, on='timestamp', how='left', suffixes=('', '_sent'))
+                    logger.debug(f"   ✓ Merge sentiment: {len(df.columns)} columnas")
 
                 # Macro (4h data)
                 macro_df = pd.read_parquet('data/macro_ETH_USDT.parquet')
+                logger.debug(f"📊 Macro: {len(macro_df)} filas")
                 if not macro_df.empty and 'timestamp' in macro_df.columns:
                     macro_df['timestamp'] = pd.to_datetime(macro_df['timestamp'])
                     df = df.merge(macro_df, on='timestamp', how='left', suffixes=('', '_macro'))
+                    logger.debug(f"   ✓ Merge macro: {len(df.columns)} columnas")
+
+                logger.debug(f"📊 Total features después de merge: {len(df.columns)} columnas")
 
             except Exception as e:
                 logger.warning(f"⚠️ No se pudieron cargar datos adicionales: {e}")
                 logger.warning("⚠️ Usando solo features de precio")
+                import traceback
+                logger.debug(traceback.format_exc())
 
             # 3. Forward fill NaNs de merge (usar último valor disponible)
             df = df.ffill()
