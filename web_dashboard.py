@@ -406,9 +406,22 @@ class LiveTradingBot:
             # Tomar última fila con features
             latest = df.iloc[-1:].copy()
 
-            # El modelo necesita TODAS las columnas (incluyendo OHLCV)
-            # NO filtrar ninguna columna, el modelo espera todas las features
-            X = latest
+            # El modelo necesita TODAS las columnas en un orden específico
+            # Obtener el orden correcto desde el modelo (si está disponible)
+            if hasattr(self.model, 'feature_names_in_'):
+                expected_features = self.model.feature_names_in_
+                # Reordenar columnas según el modelo espera
+                missing_cols = [col for col in expected_features if col not in latest.columns]
+                if missing_cols:
+                    logger.warning(f"⚠️ Faltan columnas en predicción: {missing_cols}")
+                    for col in missing_cols:
+                        latest[col] = 0.0
+
+                # Reordenar columnas en el orden correcto
+                X = latest[expected_features]
+            else:
+                # Si el modelo no tiene feature_names_in_, usar todas las columnas
+                X = latest
 
             # Predicción
             pred_class = self.model.predict(X)[0]
