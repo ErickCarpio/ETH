@@ -313,7 +313,9 @@ class LiveTradingBot:
         """Calcula features completos usando el FeatureEngineer"""
         try:
             # 1. Features técnicas de precio (usando FeatureEngineer)
-            df = self.feature_engineer.create_technical_features(df, timeframe='1h')
+            # IMPORTANTE: Usar '15m' para que genere nombres correctos de features
+            # (volatility_1h, volatility_6h, etc.) que el modelo espera
+            df = self.feature_engineer.create_technical_features(df, timeframe='15m')
 
             # 2. Cargar datos adicionales (derivatives, sentiment, macro)
             # Estos son datos históricos que se actualizan periódicamente
