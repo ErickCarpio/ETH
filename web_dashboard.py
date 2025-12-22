@@ -147,19 +147,30 @@ class LiveTradingBot:
                     'apiKey': testnet_api_key,
                     'secret': testnet_api_secret,
                     'enableRateLimit': True,
-                    'options': {'defaultType': 'future'},
+                    'options': {
+                        'defaultType': 'future',
+                        'loadCurrencies': False,  # No cargar currencies (evita llamadas SAPI)
+                    },
                     'urls': {
                         'api': {
+                            # Futures endpoints (FAPI)
                             'public': 'https://demo-fapi.binance.com/fapi/v1',
                             'private': 'https://demo-fapi.binance.com/fapi/v1',
                             'fapiPublic': 'https://demo-fapi.binance.com/fapi/v1',
                             'fapiPrivate': 'https://demo-fapi.binance.com/fapi/v1',
                             'fapiPublicV2': 'https://demo-fapi.binance.com/fapi/v2',
                             'fapiPrivateV2': 'https://demo-fapi.binance.com/fapi/v2',
+                            # Spot/SAPI endpoints también deben apuntar a testnet para evitar errores
+                            'v1': 'https://demo-fapi.binance.com/fapi/v1',
+                            'v3': 'https://demo-fapi.binance.com/fapi/v1',
+                            'sapi': 'https://demo-fapi.binance.com/fapi/v1',
+                            'sapiV1': 'https://demo-fapi.binance.com/fapi/v1',
+                            'sapiV2': 'https://demo-fapi.binance.com/fapi/v1',
                         }
                     }
                 })
 
+                # Cargar mercados (solo futures)
                 await self.exchange.load_markets()
                 logger.info("✓ Conectado a Binance Testnet (demo-fapi.binance.com)")
 
