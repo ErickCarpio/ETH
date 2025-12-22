@@ -149,7 +149,6 @@ class LiveTradingBot:
                     'enableRateLimit': True,
                     'options': {
                         'defaultType': 'future',
-                        'loadCurrencies': False,  # No cargar currencies (evita llamadas SAPI)
                     },
                     'urls': {
                         'api': {
@@ -160,19 +159,20 @@ class LiveTradingBot:
                             'fapiPrivate': 'https://demo-fapi.binance.com/fapi/v1',
                             'fapiPublicV2': 'https://demo-fapi.binance.com/fapi/v2',
                             'fapiPrivateV2': 'https://demo-fapi.binance.com/fapi/v2',
-                            # Spot/SAPI endpoints también deben apuntar a testnet para evitar errores
-                            'v1': 'https://demo-fapi.binance.com/fapi/v1',
-                            'v3': 'https://demo-fapi.binance.com/fapi/v1',
-                            'sapi': 'https://demo-fapi.binance.com/fapi/v1',
-                            'sapiV1': 'https://demo-fapi.binance.com/fapi/v1',
-                            'sapiV2': 'https://demo-fapi.binance.com/fapi/v1',
                         }
                     }
                 })
 
-                # Cargar mercados (solo futures)
-                await self.exchange.load_markets()
+                # NO llamar a load_markets() en testnet - los mercados se cargan automáticamente
                 logger.info("✓ Conectado a Binance Testnet (demo-fapi.binance.com)")
+
+                # Verificar balance directamente
+                try:
+                    balance = await self.exchange.fetch_balance()
+                    usdt_balance = balance.get('USDT', {}).get('free', 0)
+                    logger.info(f"✓ Balance Testnet USDT: ${usdt_balance:.2f}")
+                except Exception as e:
+                    logger.warning(f"⚠️ No se pudo verificar balance: {e}")
 
                 # Configurar LEVERAGE y MARGIN MODE
                 symbol = exchange_config.get('symbol', 'ETHUSDT')
