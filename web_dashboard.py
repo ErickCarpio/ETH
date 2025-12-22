@@ -141,6 +141,8 @@ class LiveTradingBot:
                     )
 
                 # Configurar CCXT para usar Testnet Futures
+                # IMPORTANTE: Binance usa demo-fapi.binance.com para USDS-Margined Futures (ETHUSDT)
+                # Documentación: https://developers.binance.com/docs/derivatives/usds-margined-futures/general-info
                 self.exchange = ccxt.binance({
                     'apiKey': testnet_api_key,
                     'secret': testnet_api_secret,
@@ -148,18 +150,18 @@ class LiveTradingBot:
                     'options': {'defaultType': 'future'},
                     'urls': {
                         'api': {
-                            'public': 'https://testnet.binancefuture.com/fapi/v1',
-                            'private': 'https://testnet.binancefuture.com/fapi/v1',
-                            'fapiPublic': 'https://testnet.binancefuture.com/fapi/v1',
-                            'fapiPrivate': 'https://testnet.binancefuture.com/fapi/v1',
-                            'fapiPublicV2': 'https://testnet.binancefuture.com/fapi/v2',
-                            'fapiPrivateV2': 'https://testnet.binancefuture.com/fapi/v2',
+                            'public': 'https://demo-fapi.binance.com/fapi/v1',
+                            'private': 'https://demo-fapi.binance.com/fapi/v1',
+                            'fapiPublic': 'https://demo-fapi.binance.com/fapi/v1',
+                            'fapiPrivate': 'https://demo-fapi.binance.com/fapi/v1',
+                            'fapiPublicV2': 'https://demo-fapi.binance.com/fapi/v2',
+                            'fapiPrivateV2': 'https://demo-fapi.binance.com/fapi/v2',
                         }
                     }
                 })
 
                 await self.exchange.load_markets()
-                logger.info("✓ Conectado a Binance Testnet")
+                logger.info("✓ Conectado a Binance Testnet (demo-fapi.binance.com)")
 
                 # Configurar LEVERAGE y MARGIN MODE
                 symbol = exchange_config.get('symbol', 'ETHUSDT')

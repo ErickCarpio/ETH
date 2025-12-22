@@ -18,10 +18,13 @@ El bot ahora soporta **3 modos de trading**. Esta guía te muestra cómo configu
 
 ### 1.1 Ve a Binance Testnet Futures
 
-Abre en tu navegador:
+**IMPORTANTE:** Para USDS-Margined Futures (ETHUSDT), obtén tus API keys en:
+
 ```
 https://testnet.binancefuture.com
 ```
+
+**Nota:** El bot se conectará automáticamente a `demo-fapi.binance.com` que es el endpoint correcto para USDS-Margined Futures testnet.
 
 ### 1.2 Crea una Cuenta (Gratis)
 
