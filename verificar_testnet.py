@@ -72,6 +72,8 @@ async def verificar_conexion_testnet():
             'fapiPrivate': 'https://demo-fapi.binance.com/fapi/v1',
             'fapiPublicV2': 'https://demo-fapi.binance.com/fapi/v2',
             'fapiPrivateV2': 'https://demo-fapi.binance.com/fapi/v2',
+            'fapiPublicV3': 'https://demo-fapi.binance.com/fapi/v3',
+            'fapiPrivateV3': 'https://demo-fapi.binance.com/fapi/v3',
             'public': 'https://demo-fapi.binance.com/fapi/v1',
             'private': 'https://demo-fapi.binance.com/fapi/v1',
         }
