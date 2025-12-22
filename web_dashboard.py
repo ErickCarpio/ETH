@@ -19,9 +19,10 @@ import xgboost as xgb
 import ccxt.async_support as ccxt
 import logging
 
-# Añadir path para importar CacheManager
+# Añadir path para importar CacheManager y FeatureEngineer
 sys.path.append(str(Path(__file__).parent))
 from data.cache.cache_manager import CacheManager
+from feature_engineering import FeatureEngineer
 
 # Inicializar CacheManager
 cache_mgr = CacheManager()
@@ -75,6 +76,9 @@ class LiveTradingBot:
         self.current_position = None
         self.trades_file = Path('logs/live_trades.csv')
         self.trades_file.parent.mkdir(exist_ok=True)
+
+        # Inicializar FeatureEngineer con config completo
+        self.feature_engineer = FeatureEngineer(self.config)
 
     def _load_config(self, path):
         """Carga configuración"""
@@ -306,43 +310,45 @@ class LiveTradingBot:
             return pd.DataFrame()
 
     def calculate_features(self, df):
-        """Calcula features básicos para predicción"""
-        # Features simples (los mismos que el modelo entrenado)
-        df = df.copy()
+        """Calcula features completos usando el FeatureEngineer"""
+        try:
+            # 1. Features técnicas de precio (usando FeatureEngineer)
+            df = self.feature_engineer.create_technical_features(df, timeframe='1h')
 
-        # Returns
-        df['returns'] = df['close'].pct_change()
-        df['returns_5'] = df['close'].pct_change(5)
-        df['returns_10'] = df['close'].pct_change(10)
+            # 2. Cargar datos adicionales (derivatives, sentiment, macro)
+            # Estos son datos históricos que se actualizan periódicamente
+            try:
+                # Derivatives (funding rate, OI, etc.)
+                derivatives_df = pd.read_parquet('data/coinglass_ETH_USDT.parquet')
+                if not derivatives_df.empty and 'timestamp' in derivatives_df.columns:
+                    derivatives_df['timestamp'] = pd.to_datetime(derivatives_df['timestamp'])
+                    df = df.merge(derivatives_df, on='timestamp', how='left', suffixes=('', '_deriv'))
 
-        # Volatilidad
-        df['volatility'] = df['returns'].rolling(20).std()
+                # Sentiment
+                sentiment_df = pd.read_parquet('data/sentiment_ETH_USDT.parquet')
+                if not sentiment_df.empty and 'timestamp' in sentiment_df.columns:
+                    sentiment_df['timestamp'] = pd.to_datetime(sentiment_df['timestamp'])
+                    df = df.merge(sentiment_df, on='timestamp', how='left', suffixes=('', '_sent'))
 
-        # RSI
-        delta = df['close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-        rs = gain / loss
-        df['rsi'] = 100 - (100 / (1 + rs))
+                # Macro (4h data)
+                macro_df = pd.read_parquet('data/macro_ETH_USDT.parquet')
+                if not macro_df.empty and 'timestamp' in macro_df.columns:
+                    macro_df['timestamp'] = pd.to_datetime(macro_df['timestamp'])
+                    df = df.merge(macro_df, on='timestamp', how='left', suffixes=('', '_macro'))
 
-        # MACD
-        ema_12 = df['close'].ewm(span=12).mean()
-        ema_26 = df['close'].ewm(span=26).mean()
-        df['macd'] = ema_12 - ema_26
-        df['macd_signal'] = df['macd'].ewm(span=9).mean()
+            except Exception as e:
+                logger.warning(f"⚠️ No se pudieron cargar datos adicionales: {e}")
+                logger.warning("⚠️ Usando solo features de precio")
 
-        # Bollinger Bands
-        sma_20 = df['close'].rolling(20).mean()
-        std_20 = df['close'].rolling(20).std()
-        df['bb_upper'] = sma_20 + (2 * std_20)
-        df['bb_lower'] = sma_20 - (2 * std_20)
-        df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+            # 3. Forward fill NaNs de merge (usar último valor disponible)
+            df = df.ffill()
 
-        # Volume features
-        df['volume_sma'] = df['volume'].rolling(20).mean()
-        df['volume_ratio'] = df['volume'] / df['volume_sma']
+            return df.dropna()
 
-        return df.dropna()
+        except Exception as e:
+            logger.error(f"Error calculando features: {e}")
+            # Fallback a features básicas si falla
+            return df
 
     def make_prediction(self, df):
         """Hace predicción LONG/SHORT"""
