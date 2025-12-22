@@ -3,7 +3,7 @@ Script de Verificación de Conexión a Binance Demo Trading
 Diagnostica problemas con API keys usando ccxt.binanceusdm + sandbox mode
 """
 
-import ccxt
+import ccxt.async_support as ccxt  # CRÍTICO: Versión ASYNC para usar await
 import asyncio
 import json
 from pathlib import Path
