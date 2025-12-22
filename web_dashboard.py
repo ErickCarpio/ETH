@@ -297,8 +297,8 @@ class LiveTradingBot:
             logger.error(f"❌ Error conectando exchange: {e}")
             return False
 
-    async def fetch_live_data(self, symbol='ETHUSDT', timeframe='1h', limit=100):
-        """Obtiene datos en vivo de Binance"""
+    async def fetch_live_data(self, symbol='ETHUSDT', timeframe='1h', limit=350):
+        """Obtiene datos en vivo de Binance (350 candles para statistical features)"""
         try:
             ohlcv = await self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -321,7 +321,7 @@ class LiveTradingBot:
             if hasattr(self.feature_engineer, 'statistical_engine') and self.feature_engineer.statistical_engine:
                 try:
                     logger.debug("📊 Generando statistical features...")
-                    df = self.feature_engineer.statistical_engine.add_all_features(df)
+                    df = self.feature_engineer.statistical_engine.compute_all_features(df, price_col='close')
                     logger.debug(f"   ✓ Statistical features: {len(df.columns)} columnas totales")
                 except Exception as e:
                     logger.warning(f"⚠️ Error generando statistical features: {e}")
