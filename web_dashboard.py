@@ -378,6 +378,21 @@ class LiveTradingBot:
             # 3. Forward fill NaNs de merge (usar último valor disponible)
             df = df.ffill()
 
+            # 4. CRÍTICO: Asegurar que existan TODAS las features que el modelo espera
+            # Si falta alguna, agregarla con valor 0
+            required_external_features = [
+                'funding_rate', 'open_interest_norm', 'oi_change',  # Derivatives
+                'Net_Flow_Z',  # Derivatives/On-chain
+                'BTCDOM_ROC', 'FinBERT_Score',  # Sentiment
+                'stablecoin_mcap', 'stablecoin_flow_7d', 'stablecoin_trend'  # Macro
+            ]
+
+            missing_features = [f for f in required_external_features if f not in df.columns]
+            if missing_features:
+                logger.warning(f"⚠️ Agregando {len(missing_features)} features faltantes con valor 0: {missing_features}")
+                for feature in missing_features:
+                    df[feature] = 0.0
+
             return df.dropna()
 
         except Exception as e:
