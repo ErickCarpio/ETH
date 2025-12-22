@@ -1,6 +1,6 @@
 """
-Script de Verificación de Conexión a Binance Testnet
-Diagnostica problemas con API keys y endpoints
+Script de Verificación de Conexión a Binance Demo Trading
+Diagnostica problemas con API keys usando ccxt.binanceusdm + sandbox mode
 """
 
 import ccxt
@@ -13,7 +13,7 @@ async def verificar_conexion_testnet():
     """Verifica conexión a Binance Testnet con diagnóstico detallado"""
 
     print("=" * 70)
-    print("🔍 VERIFICADOR DE CONEXIÓN BINANCE TESTNET")
+    print("🔍 VERIFICADOR DE CONEXIÓN BINANCE DEMO TRADING")
     print("=" * 70)
     print()
 
@@ -44,30 +44,20 @@ async def verificar_conexion_testnet():
     print(f"   ✓ testnet_secret: {testnet_api_secret[:10]}...{testnet_api_secret[-10:]}")
     print()
 
-    # PRUEBA 1: Endpoint demo-fapi.binance.com
-    print("🧪 PRUEBA 1: Conexión a demo-fapi.binance.com (USDS-Margined)")
+    # PRUEBA 1: Conexión a demo.binance.com usando binanceusdm
+    print("🧪 PRUEBA 1: Conexión a demo.binance.com (USDT-Margined Futures)")
     print("-" * 70)
     exchange = None
     try:
-        exchange = ccxt.binance({
+        # Usar binanceusdm con sandbox mode
+        exchange = ccxt.binanceusdm({
             'apiKey': testnet_api_key,
             'secret': testnet_api_secret,
             'enableRateLimit': True,
-            'options': {
-                'defaultType': 'future',
-            },
-            'urls': {
-                'api': {
-                    # Futures endpoints (FAPI)
-                    'public': 'https://demo-fapi.binance.com/fapi/v1',
-                    'private': 'https://demo-fapi.binance.com/fapi/v1',
-                    'fapiPublic': 'https://demo-fapi.binance.com/fapi/v1',
-                    'fapiPrivate': 'https://demo-fapi.binance.com/fapi/v1',
-                    'fapiPublicV2': 'https://demo-fapi.binance.com/fapi/v2',
-                    'fapiPrivateV2': 'https://demo-fapi.binance.com/fapi/v2',
-                }
-            }
         })
+
+        # Activar modo sandbox/demo
+        exchange.set_sandbox_mode(True)
 
         print("   Conectando y obteniendo balance...")
         balance = await exchange.fetch_balance()
@@ -76,7 +66,7 @@ async def verificar_conexion_testnet():
         free = usdt_balance.get('free', 0)
 
         print()
-        print("   ✅ CONEXIÓN EXITOSA a demo-fapi.binance.com")
+        print("   ✅ CONEXIÓN EXITOSA a demo.binance.com")
         print(f"   💰 Balance USDT: ${free:.2f}")
         print()
 
@@ -95,12 +85,12 @@ async def verificar_conexion_testnet():
             print("   Este error significa que Binance no reconoce tu API Key.")
             print()
             print("   ⚠️ POSIBLES CAUSAS:")
-            print("   1. Las keys son de PRODUCCIÓN (binance.com) y NO de TESTNET")
-            print("   2. Las keys fueron creadas en testnet pero revocadas/eliminadas")
-            print("   3. Las keys no existen en el sistema de testnet")
+            print("   1. Las keys son de PRODUCCIÓN (binance.com) y NO de DEMO")
+            print("   2. Las keys fueron creadas en demo pero revocadas/eliminadas")
+            print("   3. Las keys no existen en el sistema de demo")
             print()
             print("   ✅ SOLUCIÓN:")
-            print("   1. Ve a: https://testnet.binancefuture.com")
+            print("   1. Ve a: https://demo.binance.com")
             print("   2. Login con tu cuenta")
             print("   3. API Management → REVOCA las keys antiguas")
             print("   4. API Management → CREA NUEVAS keys")
@@ -112,7 +102,7 @@ async def verificar_conexion_testnet():
             print("   Las keys existen pero no tienen permisos correctos.")
             print()
             print("   ✅ SOLUCIÓN:")
-            print("   1. Ve a: https://testnet.binancefuture.com")
+            print("   1. Ve a: https://demo.binance.com")
             print("   2. API Management → Edit API")
             print("   3. Habilita: 'Enable Futures' o 'Enable Trading'")
             print("   4. Guarda cambios")
@@ -124,74 +114,21 @@ async def verificar_conexion_testnet():
             except:
                 pass
 
-    # PRUEBA 2: Endpoint testnet.binancefuture.com (alternativo)
-    print()
-    print("🧪 PRUEBA 2: Conexión a testnet.binancefuture.com (Coin-Margined)")
-    print("-" * 70)
-    exchange2 = None
-    try:
-        exchange2 = ccxt.binance({
-            'apiKey': testnet_api_key,
-            'secret': testnet_api_secret,
-            'enableRateLimit': True,
-            'options': {
-                'defaultType': 'future',
-            },
-            'urls': {
-                'api': {
-                    'public': 'https://testnet.binancefuture.com/fapi/v1',
-                    'private': 'https://testnet.binancefuture.com/fapi/v1',
-                    'fapiPublic': 'https://testnet.binancefuture.com/fapi/v1',
-                    'fapiPrivate': 'https://testnet.binancefuture.com/fapi/v1',
-                    'fapiPublicV2': 'https://testnet.binancefuture.com/fapi/v2',
-                    'fapiPrivateV2': 'https://testnet.binancefuture.com/fapi/v2',
-                }
-            }
-        })
-
-        print("   Conectando y obteniendo balance...")
-        balance = await exchange2.fetch_balance()
-
-        usdt_balance = balance.get('USDT', {})
-        free = usdt_balance.get('free', 0)
-
-        print()
-        print("   ✅ CONEXIÓN EXITOSA a testnet.binancefuture.com")
-        print(f"   💰 Balance USDT: ${free:.2f}")
-        print()
-
-        if exchange2:
-            try:
-                await exchange2.close()
-            except:
-                pass
-        return True
-
-    except Exception as e:
-        error_str = str(e)
-        print(f"   ❌ ERROR: {error_str}")
-        print()
-        if exchange2:
-            try:
-                await exchange2.close()
-            except:
-                pass
-
     print()
     print("=" * 70)
     print("📝 RESUMEN:")
     print("-" * 70)
-    print("Si ambas pruebas fallaron con error -2008 'Invalid Api-Key ID',")
-    print("significa que tus API keys NO son de Binance Testnet.")
+    print("Si la prueba falló con error -2008 'Invalid Api-Key ID',")
+    print("significa que tus API keys NO son de Binance Demo Trading.")
     print()
     print("VERIFICA:")
-    print("1. ¿Creaste las keys en https://testnet.binancefuture.com?")
+    print("1. ¿Creaste las keys en https://demo.binance.com?")
     print("2. ¿O las creaste en https://binance.com? (esas son de PRODUCCIÓN)")
     print()
-    print("Si creaste las keys en binance.com → NO FUNCIONARÁN en testnet")
-    print("Si creaste las keys en testnet.binancefuture.com → Deberían funcionar")
+    print("Si creaste las keys en binance.com → NO FUNCIONARÁN en demo")
+    print("Si creaste las keys en demo.binance.com → Deberían funcionar")
     print()
-    print("SOLUCIÓN: Crea NUEVAS keys en https://testnet.binancefuture.com")
+    print("SOLUCIÓN: Crea NUEVAS keys en https://demo.binance.com")
     print("=" * 70)
 
 

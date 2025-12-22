@@ -124,53 +124,40 @@ class LiveTradingBot:
                 self.simulated_balance = 10000.0  # $10,000 simulados
                 logger.info(f"✓ Balance Simulado: ${self.simulated_balance:.2f}")
 
-            # MODO 2: TESTNET BINANCE (Dinero Ficticio de Binance)
+            # MODO 2: DEMO BINANCE (Dinero Ficticio de Binance)
             elif is_testnet:
-                logger.info("🧪 Modo TESTNET BINANCE (Dinero Ficticio - Sin Riesgo)")
-                logger.info("   Conectando a testnet.binancefuture.com")
+                logger.info("🧪 Modo DEMO BINANCE (Dinero Ficticio - Sin Riesgo)")
+                logger.info("   Conectando a demo.binance.com")
 
                 testnet_api_key = exchange_config.get('testnet_api_key', '').strip()
                 testnet_api_secret = exchange_config.get('testnet_api_secret', '').strip()
 
                 if not testnet_api_key or not testnet_api_secret:
                     raise ValueError(
-                        "❌ API keys de Testnet no configuradas.\n"
-                        "   1. Ve a: https://testnet.binancefuture.com\n"
+                        "❌ API keys de Demo no configuradas.\n"
+                        "   1. Ve a: https://demo.binance.com\n"
                         "   2. API Management → Create API Key\n"
                         "   3. Copia las keys a config_15min.json (testnet_api_key, testnet_api_secret)"
                     )
 
-                # Configurar CCXT para usar Testnet Futures
-                # IMPORTANTE: Binance usa demo-fapi.binance.com para USDS-Margined Futures (ETHUSDT)
-                # Documentación: https://developers.binance.com/docs/derivatives/usds-margined-futures/general-info
-                self.exchange = ccxt.binance({
+                # Usar binanceusdm para USDT-Margined Futures con modo demo/sandbox
+                # Documentación: https://github.com/ccxt/ccxt/wiki/Manual#sandbox-mode
+                self.exchange = ccxt.binanceusdm({
                     'apiKey': testnet_api_key,
                     'secret': testnet_api_secret,
                     'enableRateLimit': True,
-                    'options': {
-                        'defaultType': 'future',
-                    },
-                    'urls': {
-                        'api': {
-                            # Futures endpoints (FAPI)
-                            'public': 'https://demo-fapi.binance.com/fapi/v1',
-                            'private': 'https://demo-fapi.binance.com/fapi/v1',
-                            'fapiPublic': 'https://demo-fapi.binance.com/fapi/v1',
-                            'fapiPrivate': 'https://demo-fapi.binance.com/fapi/v1',
-                            'fapiPublicV2': 'https://demo-fapi.binance.com/fapi/v2',
-                            'fapiPrivateV2': 'https://demo-fapi.binance.com/fapi/v2',
-                        }
-                    }
                 })
 
-                # NO llamar a load_markets() en testnet - los mercados se cargan automáticamente
-                logger.info("✓ Conectado a Binance Testnet (demo-fapi.binance.com)")
+                # Activar modo sandbox/demo
+                self.exchange.set_sandbox_mode(True)
 
-                # Verificar balance directamente
+                logger.info("✓ Conectado a Binance Demo Trading")
+
+                # Verificar balance
                 try:
                     balance = await self.exchange.fetch_balance()
                     usdt_balance = balance.get('USDT', {}).get('free', 0)
-                    logger.info(f"✓ Balance Testnet USDT: ${usdt_balance:.2f}")
+                    logger.info(f"✓ Balance Demo USDT: ${usdt_balance:.2f}")
                 except Exception as e:
                     logger.warning(f"⚠️ No se pudo verificar balance: {e}")
 
