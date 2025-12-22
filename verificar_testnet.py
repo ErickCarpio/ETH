@@ -54,11 +54,30 @@ async def verificar_conexion_testnet():
             'apiKey': testnet_api_key,
             'secret': testnet_api_secret,
             'enableRateLimit': True,
+            'options': {
+                'defaultType': 'future',
+                'adjustForTimeDifference': True,  # Sincroniza reloj local con servidor
+            }
         })
 
         # Activar modo sandbox/demo
         exchange.set_sandbox_mode(True)
 
+        # CRÍTICO: Sobrescribir URLs explícitamente
+        # Las versiones de CCXT pueden tener URLs obsoletas del antiguo testnet
+        # Forzamos el enrutamiento a demo-fapi.binance.com según doc oficial:
+        # https://developers.binance.com/docs/derivatives/usds-margined-futures/general-info
+        new_testnet_urls = {
+            'fapiPublic': 'https://demo-fapi.binance.com/fapi/v1',
+            'fapiPrivate': 'https://demo-fapi.binance.com/fapi/v1',
+            'fapiPublicV2': 'https://demo-fapi.binance.com/fapi/v2',
+            'fapiPrivateV2': 'https://demo-fapi.binance.com/fapi/v2',
+            'public': 'https://demo-fapi.binance.com/fapi/v1',
+            'private': 'https://demo-fapi.binance.com/fapi/v1',
+        }
+        exchange.urls['api'] = new_testnet_urls
+
+        print("   URLs configuradas: demo-fapi.binance.com")
         print("   Conectando y obteniendo balance...")
         balance = await exchange.fetch_balance()
 
