@@ -47,20 +47,31 @@ async def verificar_conexion_testnet():
     # PRUEBA 1: Endpoint demo-fapi.binance.com
     print("🧪 PRUEBA 1: Conexión a demo-fapi.binance.com (USDS-Margined)")
     print("-" * 70)
+    exchange = None
     try:
         exchange = ccxt.binance({
             'apiKey': testnet_api_key,
             'secret': testnet_api_secret,
             'enableRateLimit': True,
-            'options': {'defaultType': 'future'},
+            'options': {
+                'defaultType': 'future',
+                'loadCurrencies': False,  # Evitar llamadas SAPI
+            },
             'urls': {
                 'api': {
+                    # Futures endpoints (FAPI)
                     'public': 'https://demo-fapi.binance.com/fapi/v1',
                     'private': 'https://demo-fapi.binance.com/fapi/v1',
                     'fapiPublic': 'https://demo-fapi.binance.com/fapi/v1',
                     'fapiPrivate': 'https://demo-fapi.binance.com/fapi/v1',
                     'fapiPublicV2': 'https://demo-fapi.binance.com/fapi/v2',
                     'fapiPrivateV2': 'https://demo-fapi.binance.com/fapi/v2',
+                    # Spot/SAPI endpoints también redirigir para evitar errores
+                    'v1': 'https://demo-fapi.binance.com/fapi/v1',
+                    'v3': 'https://demo-fapi.binance.com/fapi/v1',
+                    'sapi': 'https://demo-fapi.binance.com/fapi/v1',
+                    'sapiV1': 'https://demo-fapi.binance.com/fapi/v1',
+                    'sapiV2': 'https://demo-fapi.binance.com/fapi/v1',
                 }
             }
         })
@@ -80,7 +91,8 @@ async def verificar_conexion_testnet():
         print(f"   💰 Balance USDT: ${free:.2f}")
         print()
 
-        await exchange.close()
+        if exchange:
+            await exchange.close()
         return True
 
     except Exception as e:
@@ -117,24 +129,40 @@ async def verificar_conexion_testnet():
             print("   4. Guarda cambios")
             print()
 
-        await exchange.close()
+        if exchange:
+            try:
+                await exchange.close()
+            except:
+                pass
 
     # PRUEBA 2: Endpoint testnet.binancefuture.com (alternativo)
     print()
     print("🧪 PRUEBA 2: Conexión a testnet.binancefuture.com (Coin-Margined)")
     print("-" * 70)
+    exchange2 = None
     try:
         exchange2 = ccxt.binance({
             'apiKey': testnet_api_key,
             'secret': testnet_api_secret,
             'enableRateLimit': True,
-            'options': {'defaultType': 'future'},
+            'options': {
+                'defaultType': 'future',
+                'loadCurrencies': False,  # Evitar llamadas SAPI
+            },
             'urls': {
                 'api': {
                     'public': 'https://testnet.binancefuture.com/fapi/v1',
                     'private': 'https://testnet.binancefuture.com/fapi/v1',
                     'fapiPublic': 'https://testnet.binancefuture.com/fapi/v1',
                     'fapiPrivate': 'https://testnet.binancefuture.com/fapi/v1',
+                    'fapiPublicV2': 'https://testnet.binancefuture.com/fapi/v2',
+                    'fapiPrivateV2': 'https://testnet.binancefuture.com/fapi/v2',
+                    # Spot/SAPI endpoints redirigir
+                    'v1': 'https://testnet.binancefuture.com/fapi/v1',
+                    'v3': 'https://testnet.binancefuture.com/fapi/v1',
+                    'sapi': 'https://testnet.binancefuture.com/fapi/v1',
+                    'sapiV1': 'https://testnet.binancefuture.com/fapi/v1',
+                    'sapiV2': 'https://testnet.binancefuture.com/fapi/v1',
                 }
             }
         })
@@ -154,14 +182,22 @@ async def verificar_conexion_testnet():
         print(f"   💰 Balance USDT: ${free:.2f}")
         print()
 
-        await exchange2.close()
+        if exchange2:
+            try:
+                await exchange2.close()
+            except:
+                pass
         return True
 
     except Exception as e:
         error_str = str(e)
         print(f"   ❌ ERROR: {error_str}")
         print()
-        await exchange2.close()
+        if exchange2:
+            try:
+                await exchange2.close()
+            except:
+                pass
 
     print()
     print("=" * 70)
