@@ -28,7 +28,7 @@ class DailySignalsGenerator:
 
     def __init__(self, config_path='config_15min.json'):
         self.config = self._load_config(config_path)
-        self.model = None
+        self.models = {}  # Cache de modelos por par (multi-model approach)
         self.exchange = None
         self.feature_engineer = None
 
@@ -38,13 +38,8 @@ class DailySignalsGenerator:
             return json.load(f)
 
     async def initialize(self):
-        """Inicializa exchange, modelo y feature engineer"""
+        """Inicializa exchange y feature engineer (modelos se cargan por demanda)"""
         logger.info("🚀 Inicializando generador de señales...")
-
-        # Cargar modelo
-        model_path = self.config.get('model_path', 'models/xgboost_model.pkl')
-        self.model = joblib.load(model_path)
-        logger.info(f"✓ Modelo cargado: {model_path}")
 
         # Inicializar FeatureEngineer
         self.feature_engineer = FeatureEngineer(self.config)
@@ -56,6 +51,47 @@ class DailySignalsGenerator:
             'options': {'defaultType': 'future'}
         })
         logger.info("✓ Exchange inicializado")
+        logger.info("✓ Modelos se cargarán bajo demanda (uno por par)")
+
+    def load_model_for_pair(self, symbol):
+        """
+        Carga el modelo específico para un par (con caching)
+
+        Args:
+            symbol: Símbolo del par (ej: 'ETH/USDT')
+
+        Returns:
+            Modelo cargado (o None si no existe)
+        """
+        # Normalizar símbolo (ETH/USDT → ETHUSDT)
+        symbol_clean = symbol.replace('/', '')
+
+        # Si ya está cargado, retornar del cache
+        if symbol_clean in self.models:
+            return self.models[symbol_clean]
+
+        # Cargar modelo del disco
+        model_path = Path(f'models/model_{symbol_clean}.json')
+
+        if not model_path.exists():
+            logger.warning(f"⚠️ Modelo no encontrado para {symbol}: {model_path}")
+            logger.warning(f"   Entrena el modelo primero con: python train_multiple_pairs.py")
+            return None
+
+        try:
+            import xgboost as xgb
+            model = xgb.XGBClassifier()
+            model.load_model(model_path)
+
+            # Guardar en cache
+            self.models[symbol_clean] = model
+
+            logger.info(f"✓ Modelo cargado para {symbol}: {model_path}")
+            return model
+
+        except Exception as e:
+            logger.error(f"❌ Error cargando modelo para {symbol}: {e}")
+            return None
 
     async def get_top_pairs(self, limit=20):
         """Obtiene los top N pares por volumen de Binance Futures"""
@@ -439,18 +475,30 @@ class DailySignalsGenerator:
                     'loss_pct': sl_pct
                 }]
 
-    def make_prediction(self, df, current_price):
+    def make_prediction(self, df, current_price, symbol):
         """
         Hace predicción y calcula múltiples opciones de entrada óptimas.
         Retorna la MEJOR opción basada en Expected Value.
+
+        Args:
+            df: DataFrame con features
+            current_price: Precio actual
+            symbol: Símbolo del par (para cargar modelo específico)
         """
         try:
+            # Cargar modelo específico del par
+            model = self.load_model_for_pair(symbol)
+
+            if model is None:
+                logger.error(f"❌ No se pudo cargar modelo para {symbol}")
+                return None
+
             # Tomar última fila
             latest = df.iloc[-1:].copy()
 
             # Reordenar columnas según modelo
-            if hasattr(self.model, 'feature_names_in_'):
-                expected_features = self.model.feature_names_in_
+            if hasattr(model, 'feature_names_in_'):
+                expected_features = model.feature_names_in_
                 missing_cols = [col for col in expected_features if col not in latest.columns]
                 if missing_cols:
                     for col in missing_cols:
@@ -460,8 +508,8 @@ class DailySignalsGenerator:
                 X = latest
 
             # Predicción
-            pred_class = self.model.predict(X)[0]
-            pred_proba = self.model.predict_proba(X)[0]
+            pred_class = model.predict(X)[0]
+            pred_proba = model.predict_proba(X)[0]
 
             confidence = pred_proba[pred_class]
             direction = 'LONG' if pred_class == 1 else 'SHORT'
@@ -535,8 +583,8 @@ class DailySignalsGenerator:
                 # Precio actual
                 current_price = df['close'].iloc[-1]
 
-                # Predicción
-                signal = self.make_prediction(df, current_price)
+                # Predicción (con modelo específico del par)
+                signal = self.make_prediction(df, current_price, symbol)
 
                 if signal:
                     signal['symbol'] = symbol

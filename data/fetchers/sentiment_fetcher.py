@@ -103,15 +103,24 @@ class SentimentFetcher:
             logger.error(f"Error CryptoPanic: {e}")
             return pd.DataFrame()
 
-    def fetch_from_newsapi(self, keywords: List[str], days: int = 28) -> pd.DataFrame:
-        """Descarga NewsAPI (Limitado a 28 días para plan gratis)"""
+    def fetch_from_newsapi(self, keywords: List[str], days: int = 28, max_results: int = 5) -> pd.DataFrame:
+        """
+        Descarga NewsAPI (Limitado a 28 días para plan gratis)
+
+        Args:
+            keywords: Lista de términos de búsqueda
+            days: Días históricos a descargar (max 28 para free tier)
+            max_results: Máximo número de noticias a obtener (default 5 para multi-par)
+                        CRÍTICO: Free tier permite 100 requests/día
+                        Para 20 pares: 5 noticias × 20 = 100 requests
+        """
         if not self.news_api_key:
             return pd.DataFrame()
 
         # FIX: Forzar máximo 28 días para evitar error 426
         safe_days = min(days, 28)
-        logger.info(f"Descargando NewsAPI (últimos {safe_days} días)...")
-        
+        logger.info(f"Descargando NewsAPI (últimos {safe_days} días, max {max_results} noticias)...")
+
         try:
             url = "https://newsapi.org/v2/everything"
             params = {
@@ -120,7 +129,7 @@ class SentimentFetcher:
                 'language': 'en',
                 'sortBy': 'publishedAt',
                 'apiKey': self.news_api_key,
-                'pageSize': 100
+                'pageSize': min(max_results, 100)  # Limitar a max_results (default 5)
             }
             
             response = requests.get(url, params=params, timeout=10)
@@ -168,12 +177,18 @@ class SentimentFetcher:
             logger.warning(f"⚠️ Error en análisis de sentimiento: {e}")
             return {'score': 0.0, 'confidence': 0.0}
 
-    def get_sentiment_dataset(self, days: int = 28) -> pd.DataFrame:
-        """Pipeline principal"""
-        
+    def get_sentiment_dataset(self, days: int = 28, max_news: int = 5) -> pd.DataFrame:
+        """
+        Pipeline principal de descarga y análisis de sentiment
+
+        Args:
+            days: Días históricos
+            max_news: Máximo de noticias de NewsAPI (default 5 para multi-par)
+        """
+
         # 1. Descargar de ambas fuentes
         df_crypto = self.fetch_from_cryptopanic()
-        df_news = self.fetch_from_newsapi(['ethereum', 'ETH'], days)
+        df_news = self.fetch_from_newsapi(['ethereum', 'ETH'], days, max_results=max_news)
         
         # 2. Combinar
         df = pd.concat([df_crypto, df_news]).drop_duplicates(subset=['title'])
