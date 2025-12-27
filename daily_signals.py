@@ -227,6 +227,9 @@ class DailySignalsGenerator:
         - Mejor precio (mayor R:R)
         - Probabilidad de que el precio llegue ahí
         - Expected Value = Probability × Risk:Reward
+
+        CRÍTICO: TP y SL son ABSOLUTOS (no % desde cada entrada)
+        Esto hace que entrar a mejor precio mejore el R:R
         """
         try:
             # Obtener soporte/resistencia
@@ -241,41 +244,67 @@ class DailySignalsGenerator:
             entry_options = []
 
             if direction == 'LONG':
-                # Para LONG, buscar niveles de SOPORTE por debajo del precio actual
+                # CALCULAR TP Y SL OBJETIVOS ABSOLUTOS (NO RELATIVOS A CADA ENTRY)
+                # TP objetivo: Próxima resistencia o +tp_pct desde precio actual
+                if sr_levels['resistance']:
+                    # Tomar primera resistencia por encima del precio actual
+                    tp_target = next((r for r in sr_levels['resistance'] if r > current_price),
+                                    current_price * (1 + tp_pct))
+                else:
+                    tp_target = current_price * (1 + tp_pct)
+
+                # SL objetivo: Próximo soporte fuerte o -sl_pct desde precio actual
+                if sr_levels['support']:
+                    # Tomar último soporte por debajo del precio actual
+                    sl_target = next((s for s in reversed(sr_levels['support']) if s < current_price),
+                                    current_price * (1 - sl_pct))
+                else:
+                    sl_target = current_price * (1 - sl_pct)
+                # Para LONG, buscar niveles de ENTRADA entre SL y precio actual
                 potential_entries = [current_price]  # Opción 1: Entrada inmediata
 
-                # Agregar niveles de soporte cercanos
+                # Agregar niveles de soporte cercanos (pero por ENCIMA del SL objetivo)
                 for support in sr_levels['support']:
-                    if support < current_price and support > current_price * 0.90:  # Máximo 10% abajo
+                    if sl_target < support < current_price:
                         potential_entries.append(support)
 
                 # Agregar niveles psicológicos (números redondos)
                 price_magnitude = 10 ** (len(str(int(current_price))) - 1)
                 for multiplier in [0.95, 0.97, 0.98, 0.99]:
                     psych_level = round(current_price * multiplier / price_magnitude) * price_magnitude
-                    if psych_level < current_price and psych_level > current_price * 0.90:
+                    if sl_target < psych_level < current_price:
                         potential_entries.append(psych_level)
 
                 # Eliminar duplicados y ordenar
                 potential_entries = sorted(list(set(potential_entries)), reverse=True)
 
-                # Calcular expected value para cada entrada
+                # Calcular expected value para cada entrada USANDO TP/SL ABSOLUTOS
                 for entry in potential_entries[:5]:  # Top 5 opciones
+                    # Verificar que entry esté entre SL y precio actual
+                    if not (sl_target < entry <= current_price):
+                        continue
+
                     # Distancia del precio actual
                     distance_pct = abs(entry - current_price) / current_price
 
                     # Probabilidad de alcanzar (basada en distancia y ATR)
-                    # Modelo simple: P = confidence × exp(-distance/ATR)
                     distance_in_atr = (current_price - entry) / atr
                     probability = confidence * np.exp(-distance_in_atr) if distance_in_atr >= 0 else confidence
                     probability = min(probability, 1.0)
 
-                    # Stop loss y take profit desde ese entry
-                    stop_loss = entry * (1 - sl_pct)
-                    take_profit = entry * (1 + tp_pct)
+                    # TP y SL ABSOLUTOS (iguales para todas las entradas)
+                    stop_loss = sl_target
+                    take_profit = tp_target
 
-                    # Risk:Reward
-                    risk_reward = tp_pct / sl_pct
+                    # Risk:Reward MEJORA si entramos más abajo
+                    # R:R = (TP - Entry) / (Entry - SL)
+                    potential_gain = take_profit - entry
+                    potential_loss = entry - stop_loss
+
+                    if potential_loss <= 0:  # Entry está en o por debajo del SL
+                        continue
+
+                    risk_reward = potential_gain / potential_loss
 
                     # Expected Value = Probability × R:R
                     expected_value = probability * risk_reward
@@ -287,30 +316,53 @@ class DailySignalsGenerator:
                         'probability': probability,
                         'risk_reward': risk_reward,
                         'expected_value': expected_value,
-                        'distance_pct': distance_pct
+                        'distance_pct': distance_pct,
+                        'gain_pct': (take_profit - entry) / entry,
+                        'loss_pct': (entry - stop_loss) / entry
                     })
 
             else:  # SHORT
-                # Para SHORT, buscar niveles de RESISTENCIA por encima del precio actual
+                # CALCULAR TP Y SL OBJETIVOS ABSOLUTOS (NO RELATIVOS A CADA ENTRY)
+                # TP objetivo: Próximo soporte o -tp_pct desde precio actual
+                if sr_levels['support']:
+                    # Tomar primer soporte por debajo del precio actual
+                    tp_target = next((s for s in reversed(sr_levels['support']) if s < current_price),
+                                    current_price * (1 - tp_pct))
+                else:
+                    tp_target = current_price * (1 - tp_pct)
+
+                # SL objetivo: Próxima resistencia fuerte o +sl_pct desde precio actual
+                if sr_levels['resistance']:
+                    # Tomar primera resistencia por encima del precio actual
+                    sl_target = next((r for r in sr_levels['resistance'] if r > current_price),
+                                    current_price * (1 + sl_pct))
+                else:
+                    sl_target = current_price * (1 + sl_pct)
+
+                # Para SHORT, buscar niveles de ENTRADA entre precio actual y SL
                 potential_entries = [current_price]  # Opción 1: Entrada inmediata
 
-                # Agregar niveles de resistencia cercanos
+                # Agregar niveles de resistencia cercanos (pero por DEBAJO del SL objetivo)
                 for resistance in sr_levels['resistance']:
-                    if resistance > current_price and resistance < current_price * 1.10:  # Máximo 10% arriba
+                    if current_price < resistance < sl_target:
                         potential_entries.append(resistance)
 
                 # Agregar niveles psicológicos
                 price_magnitude = 10 ** (len(str(int(current_price))) - 1)
                 for multiplier in [1.01, 1.02, 1.03, 1.05]:
                     psych_level = round(current_price * multiplier / price_magnitude) * price_magnitude
-                    if psych_level > current_price and psych_level < current_price * 1.10:
+                    if current_price < psych_level < sl_target:
                         potential_entries.append(psych_level)
 
                 # Eliminar duplicados y ordenar
                 potential_entries = sorted(list(set(potential_entries)))
 
-                # Calcular expected value para cada entrada
+                # Calcular expected value para cada entrada USANDO TP/SL ABSOLUTOS
                 for entry in potential_entries[:5]:  # Top 5 opciones
+                    # Verificar que entry esté entre precio actual y SL
+                    if not (current_price <= entry < sl_target):
+                        continue
+
                     # Distancia del precio actual
                     distance_pct = abs(entry - current_price) / current_price
 
@@ -319,12 +371,19 @@ class DailySignalsGenerator:
                     probability = confidence * np.exp(-distance_in_atr) if distance_in_atr >= 0 else confidence
                     probability = min(probability, 1.0)
 
-                    # Stop loss y take profit
-                    stop_loss = entry * (1 + sl_pct)
-                    take_profit = entry * (1 - tp_pct)
+                    # TP y SL ABSOLUTOS (iguales para todas las entradas)
+                    stop_loss = sl_target
+                    take_profit = tp_target
 
-                    # Risk:Reward
-                    risk_reward = tp_pct / sl_pct
+                    # Risk:Reward MEJORA si entramos más arriba (en SHORT)
+                    # R:R = (Entry - TP) / (SL - Entry)
+                    potential_gain = entry - take_profit
+                    potential_loss = stop_loss - entry
+
+                    if potential_loss <= 0:  # Entry está en o por encima del SL
+                        continue
+
+                    risk_reward = potential_gain / potential_loss
 
                     # Expected Value
                     expected_value = probability * risk_reward
@@ -336,7 +395,9 @@ class DailySignalsGenerator:
                         'probability': probability,
                         'risk_reward': risk_reward,
                         'expected_value': expected_value,
-                        'distance_pct': distance_pct
+                        'distance_pct': distance_pct,
+                        'gain_pct': (entry - take_profit) / entry,
+                        'loss_pct': (stop_loss - entry) / entry
                     })
 
             # Ordenar por expected value (mayor a menor)
@@ -346,26 +407,36 @@ class DailySignalsGenerator:
 
         except Exception as e:
             logger.error(f"Error calculando entry levels: {e}")
-            # Fallback a entrada inmediata
+            # Fallback a entrada inmediata con TP/SL porcentuales
             if direction == 'LONG':
+                entry = current_price
+                sl = current_price * (1 - sl_pct)
+                tp = current_price * (1 + tp_pct)
                 return [{
-                    'entry': current_price,
-                    'stop_loss': current_price * (1 - sl_pct),
-                    'take_profit': current_price * (1 + tp_pct),
+                    'entry': entry,
+                    'stop_loss': sl,
+                    'take_profit': tp,
                     'probability': confidence,
                     'risk_reward': tp_pct / sl_pct,
                     'expected_value': confidence * (tp_pct / sl_pct),
-                    'distance_pct': 0.0
+                    'distance_pct': 0.0,
+                    'gain_pct': tp_pct,
+                    'loss_pct': sl_pct
                 }]
             else:
+                entry = current_price
+                sl = current_price * (1 + sl_pct)
+                tp = current_price * (1 - tp_pct)
                 return [{
-                    'entry': current_price,
-                    'stop_loss': current_price * (1 + sl_pct),
-                    'take_profit': current_price * (1 - tp_pct),
+                    'entry': entry,
+                    'stop_loss': sl,
+                    'take_profit': tp,
                     'probability': confidence,
                     'risk_reward': tp_pct / sl_pct,
                     'expected_value': confidence * (tp_pct / sl_pct),
-                    'distance_pct': 0.0
+                    'distance_pct': 0.0,
+                    'gain_pct': tp_pct,
+                    'loss_pct': sl_pct
                 }]
 
     def make_prediction(self, df, current_price):
