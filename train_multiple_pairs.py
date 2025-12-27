@@ -73,11 +73,13 @@ TRAINING_CONFIG = {
 
 async def download_pair_data(symbol: str, config: dict) -> dict:
     """
-    Descarga datos completos para un par:
-    - OHLCV (1h y 4h)
-    - Sentiment (limitado a 5 noticias)
-    - Derivatives (si hay API key)
-    - On-chain (si hay API key)
+    Descarga datos completos para un par CON CACHÉ:
+    - OHLCV (1h y 4h) - usa caché si < 4 horas
+    - BTCDOM para macro
+
+    Args:
+        symbol: 'ETHUSDT', 'SOLUSDT', etc. (sin barra)
+        config: Configuración de descarga
 
     Returns:
         dict con 'df_1h', 'df_4h', 'macro'
@@ -86,42 +88,71 @@ async def download_pair_data(symbol: str, config: dict) -> dict:
     logger.info(f"📥 DESCARGANDO DATOS PARA {symbol}")
     logger.info(f"{'='*80}")
 
+    # Convertir ETHUSDT → ETH/USDT para DataManager
+    # Insertar '/' antes de 'USDT'
+    symbol_with_slash = symbol.replace('USDT', '/USDT')
+
+    # Usar DataManager con caché (4 horas)
+    from data.managers.data_manager import DataManager
+
     # 1. OHLCV 1H (para trading y features técnicas)
-    logger.info(f"⬇️  Descargando OHLCV 1h...")
-    df_1h = download_binance_data(
-        symbol=symbol,
-        timeframe=config['timeframe_1h'],
-        limit=config['candles_1h']
-    )
+    logger.info(f"⬇️  Obteniendo OHLCV 1h (con caché)...")
+    dm_1h = DataManager(symbol=symbol_with_slash, window_years=2)
+
+    # Cargar de caché o descargar
+    df_1h = dm_1h._load_from_cache("prices_1h", max_age_hours=4)
+    if df_1h.empty:
+        logger.info(f"   ⬇️  Cache miss, descargando...")
+        await dm_1h.initialize_exchange(testnet=False)
+        df_1h = await dm_1h._fetch_symbol_data(
+            symbol_with_slash,
+            timeframe=config['timeframe_1h'],
+            max_candles=config['candles_1h']
+        )
+        dm_1h._save_to_cache(df_1h, "prices_1h")
+        await dm_1h.close_exchange()
 
     if df_1h.empty:
         logger.error(f"❌ No se pudo descargar datos de {symbol}")
         return None
 
     # 2. OHLCV 4H (para macro features)
-    logger.info(f"⬇️  Descargando OHLCV 4h...")
-    df_4h = download_binance_data(
-        symbol=symbol,
-        timeframe=config['timeframe_4h'],
-        limit=config['candles_4h']
-    )
+    logger.info(f"⬇️  Obteniendo OHLCV 4h (con caché)...")
+    dm_4h = DataManager(symbol=symbol_with_slash, window_years=2)
 
-    # 3. BTCDOM para macro sentiment
-    logger.info(f"⬇️  Descargando BTCDOM (macro)...")
-    btcdom_df = download_binance_data(
-        symbol='BTCDOMUSDT',  # BTC Dominance
-        timeframe=config['timeframe_4h'],
-        limit=config['candles_4h']
-    )
+    df_4h = dm_4h._load_from_cache("prices_4h", max_age_hours=4)
+    if df_4h.empty:
+        logger.info(f"   ⬇️  Cache miss, descargando...")
+        await dm_4h.initialize_exchange(testnet=False)
+        df_4h = await dm_4h._fetch_symbol_data(
+            symbol_with_slash,
+            timeframe=config['timeframe_4h'],
+            max_candles=config['candles_4h']
+        )
+        dm_4h._save_to_cache(df_4h, "prices_4h")
+        await dm_4h.close_exchange()
+
+    # 3. BTCDOM para macro sentiment (compartido entre pares)
+    logger.info(f"⬇️  Obteniendo BTCDOM (con caché)...")
+    dm_btc = DataManager(symbol='BTCDOM/USDT', window_years=2)
+
+    btcdom_df = dm_btc._load_from_cache("prices_4h", max_age_hours=4)
+    if btcdom_df.empty:
+        logger.info(f"   ⬇️  Cache miss, descargando...")
+        await dm_btc.initialize_exchange(testnet=False)
+        btcdom_df = await dm_btc._fetch_symbol_data(
+            'BTCDOM/USDT',
+            timeframe=config['timeframe_4h'],
+            max_candles=config['candles_4h']
+        )
+        dm_btc._save_to_cache(btcdom_df, "prices_4h")
+        await dm_btc.close_exchange()
 
     macro = pd.DataFrame()
     if not btcdom_df.empty:
         macro = pd.DataFrame({'BTCDOM': btcdom_df['close']})
 
-    # Rate limiting (respetar Binance)
-    await asyncio.sleep(1)
-
-    logger.info(f"✅ Datos descargados:")
+    logger.info(f"✅ Datos obtenidos:")
     logger.info(f"   - 1h: {len(df_1h)} velas")
     logger.info(f"   - 4h: {len(df_4h)} velas")
     logger.info(f"   - Macro: {len(macro)} registros")
