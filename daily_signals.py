@@ -84,10 +84,16 @@ class DailySignalsGenerator:
             # Ordenar por volumen descendente
             pairs_with_volume.sort(key=lambda x: x['volume'], reverse=True)
 
-            # Tomar top N
-            top_pairs = [p['symbol'] for p in pairs_with_volume[:limit]]
+            # EXCLUIR BTC y tomar siguientes N pares
+            top_pairs = []
+            for p in pairs_with_volume:
+                # Excluir BTC (domina mucho el portfolio)
+                if 'BTC' not in p['symbol']:
+                    top_pairs.append(p['symbol'])
+                    if len(top_pairs) >= limit:
+                        break
 
-            logger.info(f"✓ Top {len(top_pairs)} pares: {', '.join(top_pairs[:5])}...")
+            logger.info(f"✓ Top {len(top_pairs)} pares (sin BTC): {', '.join(top_pairs[:5])}...")
             return top_pairs
 
         except Exception as e:
@@ -155,8 +161,218 @@ class DailySignalsGenerator:
             logger.error(f"Error calculando features: {e}")
             return pd.DataFrame()
 
+    def calculate_support_resistance(self, df, lookback=100):
+        """
+        Identifica niveles de soporte y resistencia basados en:
+        - Swing highs/lows
+        - Niveles psicológicos (números redondos)
+        - Volumen en precio
+        """
+        try:
+            # Tomar últimas N velas
+            recent = df.tail(lookback).copy()
+
+            # Identificar swing highs (máximos locales)
+            swing_highs = []
+            swing_lows = []
+
+            for i in range(2, len(recent) - 2):
+                # Swing high: high[i] > high[i-1,i-2,i+1,i+2]
+                if (recent['high'].iloc[i] > recent['high'].iloc[i-1] and
+                    recent['high'].iloc[i] > recent['high'].iloc[i-2] and
+                    recent['high'].iloc[i] > recent['high'].iloc[i+1] and
+                    recent['high'].iloc[i] > recent['high'].iloc[i+2]):
+                    swing_highs.append(recent['high'].iloc[i])
+
+                # Swing low: low[i] < low[i-1,i-2,i+1,i+2]
+                if (recent['low'].iloc[i] < recent['low'].iloc[i-1] and
+                    recent['low'].iloc[i] < recent['low'].iloc[i-2] and
+                    recent['low'].iloc[i] < recent['low'].iloc[i+1] and
+                    recent['low'].iloc[i] < recent['low'].iloc[i+2]):
+                    swing_lows.append(recent['low'].iloc[i])
+
+            # Agrupar niveles similares (±0.5%)
+            def cluster_levels(levels, tolerance=0.005):
+                if not levels:
+                    return []
+                levels = sorted(levels)
+                clusters = []
+                current_cluster = [levels[0]]
+
+                for level in levels[1:]:
+                    if (level - current_cluster[0]) / current_cluster[0] < tolerance:
+                        current_cluster.append(level)
+                    else:
+                        clusters.append(np.mean(current_cluster))
+                        current_cluster = [level]
+
+                clusters.append(np.mean(current_cluster))
+                return clusters
+
+            resistance_levels = cluster_levels(swing_highs)
+            support_levels = cluster_levels(swing_lows)
+
+            return {
+                'resistance': resistance_levels,
+                'support': support_levels
+            }
+
+        except Exception as e:
+            logger.error(f"Error calculando S/R: {e}")
+            return {'resistance': [], 'support': []}
+
+    def calculate_entry_levels(self, df, direction, current_price, confidence):
+        """
+        Calcula niveles de entrada óptimos balanceando:
+        - Mejor precio (mayor R:R)
+        - Probabilidad de que el precio llegue ahí
+        - Expected Value = Probability × Risk:Reward
+        """
+        try:
+            # Obtener soporte/resistencia
+            sr_levels = self.calculate_support_resistance(df)
+
+            sl_pct = self.config['trading']['stop_loss_pct']
+            tp_pct = self.config['trading']['take_profit_pct']
+
+            # Calcular ATR para medir volatilidad (probabilidad de alcanzar niveles)
+            atr = df['atr_14'].iloc[-1] if 'atr_14' in df.columns else current_price * 0.02
+
+            entry_options = []
+
+            if direction == 'LONG':
+                # Para LONG, buscar niveles de SOPORTE por debajo del precio actual
+                potential_entries = [current_price]  # Opción 1: Entrada inmediata
+
+                # Agregar niveles de soporte cercanos
+                for support in sr_levels['support']:
+                    if support < current_price and support > current_price * 0.90:  # Máximo 10% abajo
+                        potential_entries.append(support)
+
+                # Agregar niveles psicológicos (números redondos)
+                price_magnitude = 10 ** (len(str(int(current_price))) - 1)
+                for multiplier in [0.95, 0.97, 0.98, 0.99]:
+                    psych_level = round(current_price * multiplier / price_magnitude) * price_magnitude
+                    if psych_level < current_price and psych_level > current_price * 0.90:
+                        potential_entries.append(psych_level)
+
+                # Eliminar duplicados y ordenar
+                potential_entries = sorted(list(set(potential_entries)), reverse=True)
+
+                # Calcular expected value para cada entrada
+                for entry in potential_entries[:5]:  # Top 5 opciones
+                    # Distancia del precio actual
+                    distance_pct = abs(entry - current_price) / current_price
+
+                    # Probabilidad de alcanzar (basada en distancia y ATR)
+                    # Modelo simple: P = confidence × exp(-distance/ATR)
+                    distance_in_atr = (current_price - entry) / atr
+                    probability = confidence * np.exp(-distance_in_atr) if distance_in_atr >= 0 else confidence
+                    probability = min(probability, 1.0)
+
+                    # Stop loss y take profit desde ese entry
+                    stop_loss = entry * (1 - sl_pct)
+                    take_profit = entry * (1 + tp_pct)
+
+                    # Risk:Reward
+                    risk_reward = tp_pct / sl_pct
+
+                    # Expected Value = Probability × R:R
+                    expected_value = probability * risk_reward
+
+                    entry_options.append({
+                        'entry': entry,
+                        'stop_loss': stop_loss,
+                        'take_profit': take_profit,
+                        'probability': probability,
+                        'risk_reward': risk_reward,
+                        'expected_value': expected_value,
+                        'distance_pct': distance_pct
+                    })
+
+            else:  # SHORT
+                # Para SHORT, buscar niveles de RESISTENCIA por encima del precio actual
+                potential_entries = [current_price]  # Opción 1: Entrada inmediata
+
+                # Agregar niveles de resistencia cercanos
+                for resistance in sr_levels['resistance']:
+                    if resistance > current_price and resistance < current_price * 1.10:  # Máximo 10% arriba
+                        potential_entries.append(resistance)
+
+                # Agregar niveles psicológicos
+                price_magnitude = 10 ** (len(str(int(current_price))) - 1)
+                for multiplier in [1.01, 1.02, 1.03, 1.05]:
+                    psych_level = round(current_price * multiplier / price_magnitude) * price_magnitude
+                    if psych_level > current_price and psych_level < current_price * 1.10:
+                        potential_entries.append(psych_level)
+
+                # Eliminar duplicados y ordenar
+                potential_entries = sorted(list(set(potential_entries)))
+
+                # Calcular expected value para cada entrada
+                for entry in potential_entries[:5]:  # Top 5 opciones
+                    # Distancia del precio actual
+                    distance_pct = abs(entry - current_price) / current_price
+
+                    # Probabilidad de alcanzar
+                    distance_in_atr = (entry - current_price) / atr
+                    probability = confidence * np.exp(-distance_in_atr) if distance_in_atr >= 0 else confidence
+                    probability = min(probability, 1.0)
+
+                    # Stop loss y take profit
+                    stop_loss = entry * (1 + sl_pct)
+                    take_profit = entry * (1 - tp_pct)
+
+                    # Risk:Reward
+                    risk_reward = tp_pct / sl_pct
+
+                    # Expected Value
+                    expected_value = probability * risk_reward
+
+                    entry_options.append({
+                        'entry': entry,
+                        'stop_loss': stop_loss,
+                        'take_profit': take_profit,
+                        'probability': probability,
+                        'risk_reward': risk_reward,
+                        'expected_value': expected_value,
+                        'distance_pct': distance_pct
+                    })
+
+            # Ordenar por expected value (mayor a menor)
+            entry_options.sort(key=lambda x: x['expected_value'], reverse=True)
+
+            return entry_options
+
+        except Exception as e:
+            logger.error(f"Error calculando entry levels: {e}")
+            # Fallback a entrada inmediata
+            if direction == 'LONG':
+                return [{
+                    'entry': current_price,
+                    'stop_loss': current_price * (1 - sl_pct),
+                    'take_profit': current_price * (1 + tp_pct),
+                    'probability': confidence,
+                    'risk_reward': tp_pct / sl_pct,
+                    'expected_value': confidence * (tp_pct / sl_pct),
+                    'distance_pct': 0.0
+                }]
+            else:
+                return [{
+                    'entry': current_price,
+                    'stop_loss': current_price * (1 + sl_pct),
+                    'take_profit': current_price * (1 - tp_pct),
+                    'probability': confidence,
+                    'risk_reward': tp_pct / sl_pct,
+                    'expected_value': confidence * (tp_pct / sl_pct),
+                    'distance_pct': 0.0
+                }]
+
     def make_prediction(self, df, current_price):
-        """Hace predicción y calcula entrada, TP, SL"""
+        """
+        Hace predicción y calcula múltiples opciones de entrada óptimas.
+        Retorna la MEJOR opción basada en Expected Value.
+        """
         try:
             # Tomar última fila
             latest = df.iloc[-1:].copy()
@@ -179,26 +395,42 @@ class DailySignalsGenerator:
             confidence = pred_proba[pred_class]
             direction = 'LONG' if pred_class == 1 else 'SHORT'
 
-            # Calcular TP y SL
-            sl_pct = self.config['trading']['stop_loss_pct']
-            tp_pct = self.config['trading']['take_profit_pct']
+            # Calcular niveles de entrada óptimos (múltiples opciones)
+            entry_levels = self.calculate_entry_levels(df, direction, current_price, confidence)
 
-            if direction == 'LONG':
-                entry = current_price
-                stop_loss = entry * (1 - sl_pct)
-                take_profit = entry * (1 + tp_pct)
-            else:  # SHORT
-                entry = current_price
-                stop_loss = entry * (1 + sl_pct)
-                take_profit = entry * (1 - tp_pct)
+            if not entry_levels:
+                return None
+
+            # Tomar la MEJOR opción (mayor expected value)
+            best_entry = entry_levels[0]
+
+            # Preparar todas las opciones para guardar
+            all_options = []
+            for i, option in enumerate(entry_levels[:3], 1):  # Top 3 opciones
+                all_options.append({
+                    'option': i,
+                    'entry': option['entry'],
+                    'stop_loss': option['stop_loss'],
+                    'take_profit': option['take_profit'],
+                    'probability': option['probability'],
+                    'expected_value': option['expected_value'],
+                    'distance_pct': option['distance_pct']
+                })
 
             return {
                 'direction': direction,
                 'confidence': confidence,
-                'entry': entry,
-                'stop_loss': stop_loss,
-                'take_profit': take_profit,
-                'risk_reward': tp_pct / sl_pct
+                'current_price': current_price,
+                # Mejor opción (la recomendada)
+                'entry': best_entry['entry'],
+                'stop_loss': best_entry['stop_loss'],
+                'take_profit': best_entry['take_profit'],
+                'probability': best_entry['probability'],
+                'expected_value': best_entry['expected_value'],
+                'distance_pct': best_entry['distance_pct'],
+                'risk_reward': best_entry['risk_reward'],
+                # Todas las opciones (para CSV)
+                'all_entry_options': all_options
             }
 
         except Exception as e:
@@ -257,7 +489,7 @@ class DailySignalsGenerator:
         return signals
 
     def save_signals(self, signals, filename=None):
-        """Guarda señales en CSV"""
+        """Guarda señales en CSV con múltiples opciones de entrada"""
         if not signals:
             logger.warning("⚠️ No hay señales para guardar")
             return
@@ -265,42 +497,81 @@ class DailySignalsGenerator:
         if filename is None:
             filename = f"signals_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 
-        df = pd.DataFrame(signals)
+        # Guardar CSV principal (mejor opción por señal)
+        df_main = pd.DataFrame(signals)
 
-        # Reordenar columnas
-        cols = ['timestamp', 'symbol', 'direction', 'confidence', 'current_price',
-                'entry', 'stop_loss', 'take_profit', 'risk_reward']
-        df = df[cols]
+        # Reordenar columnas principales
+        main_cols = ['timestamp', 'symbol', 'direction', 'confidence', 'current_price',
+                     'entry', 'stop_loss', 'take_profit', 'probability', 'expected_value',
+                     'distance_pct', 'risk_reward']
+        df_main = df_main[main_cols]
 
         # Guardar
         output_dir = Path('signals')
         output_dir.mkdir(exist_ok=True)
         filepath = output_dir / filename
 
-        df.to_csv(filepath, index=False)
+        df_main.to_csv(filepath, index=False)
         logger.info(f"✅ Señales guardadas: {filepath}")
 
+        # Guardar CSV con TODAS las opciones de entrada (para análisis detallado)
+        all_options = []
+        for signal in signals:
+            if 'all_entry_options' in signal:
+                for option in signal['all_entry_options']:
+                    all_options.append({
+                        'timestamp': signal['timestamp'],
+                        'symbol': signal['symbol'],
+                        'direction': signal['direction'],
+                        'confidence': signal['confidence'],
+                        'current_price': signal['current_price'],
+                        'option': option['option'],
+                        'entry': option['entry'],
+                        'stop_loss': option['stop_loss'],
+                        'take_profit': option['take_profit'],
+                        'probability': option['probability'],
+                        'expected_value': option['expected_value'],
+                        'distance_pct': option['distance_pct']
+                    })
+
+        if all_options:
+            df_all = pd.DataFrame(all_options)
+            filepath_all = output_dir / filename.replace('.csv', '_all_options.csv')
+            df_all.to_csv(filepath_all, index=False)
+            logger.info(f"✅ Todas las opciones guardadas: {filepath_all}")
+
         # Mostrar resumen
-        print("\n" + "="*80)
+        print("\n" + "="*100)
         print(f"📊 SEÑALES DIARIAS - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print("="*80)
+        print("="*100)
 
         # Filtrar por confianza mínima
         threshold = self.config['trading']['prediction_threshold']
-        high_conf = df[df['confidence'] >= threshold]
+        high_conf = df_main[df_main['confidence'] >= threshold]
 
         if not high_conf.empty:
-            print(f"\n🎯 SEÑALES DE ALTA CONFIANZA (>={threshold:.0%}):")
-            print(high_conf.to_string(index=False))
+            print(f"\n🎯 SEÑALES DE ALTA CONFIANZA (>={threshold:.0%}):\n")
+            # Mostrar solo columnas más importantes
+            display_cols = ['symbol', 'direction', 'confidence', 'current_price', 'entry',
+                           'probability', 'expected_value', 'distance_pct']
+            print(high_conf[display_cols].to_string(index=False))
+
+            print("\n📝 NOTA: Usa 'distance_pct' para ver cuánto debe bajar/subir el precio para entrada óptima")
+            print("📝 'probability' = probabilidad de que llegue a ese precio")
+            print("📝 'expected_value' = Probability × Risk:Reward (mayor es mejor)")
         else:
             print(f"\n⚠️ No hay señales con confianza >= {threshold:.0%}")
 
-        print(f"\n📈 TODAS LAS SEÑALES ({len(df)}):")
-        print(df.to_string(index=False))
+        print(f"\n📈 RESUMEN DE TODAS LAS SEÑALES ({len(df_main)}):")
+        summary_cols = ['symbol', 'direction', 'confidence', 'expected_value']
+        print(df_main[summary_cols].to_string(index=False))
 
-        print("\n" + "="*80)
-        print(f"📁 Archivo guardado: {filepath}")
-        print("="*80 + "\n")
+        print("\n" + "="*100)
+        print(f"📁 Archivos guardados:")
+        print(f"  - Mejores entradas: {filepath}")
+        if all_options:
+            print(f"  - Todas las opciones: {filepath_all}")
+        print("="*100 + "\n")
 
     async def run(self, num_pairs=20):
         """Ejecuta el generador de señales"""
