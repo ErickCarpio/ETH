@@ -262,6 +262,17 @@ def train_model_for_pair(features_df: pd.DataFrame, symbol: str, config: dict) -
         logger.error(f"❌ Solo hay una clase en los datos. No se puede entrenar.")
         return None
 
+    # Pesos temporales (calcular ANTES del split, usando todo el DataFrame)
+    temporal_weighter = TemporalWeighting(
+        decay_rate=0.001,  # Decay suave
+        min_weight=0.1,    # Peso mínimo 10%
+        max_weight=1.0,    # Peso máximo 100%
+        recent_days=7      # Últimos 7 días peso completo
+    )
+
+    # Calcular pesos con todo el DataFrame (que tiene índice temporal)
+    all_weights = temporal_weighter.calculate_weights(features_df)
+
     # Split temporal (80% train, 20% test)
     split_idx = int(len(X) * 0.8)
     X_train = X.iloc[:split_idx]
@@ -269,9 +280,8 @@ def train_model_for_pair(features_df: pd.DataFrame, symbol: str, config: dict) -
     y_train = y.iloc[:split_idx]
     y_test = y.iloc[split_idx:]
 
-    # Pesos temporales (datos recientes más importantes)
-    temporal_weighter = TemporalWeighting()
-    sample_weights = temporal_weighter.calculate_exponential_weights(len(X_train))
+    # Slice de pesos para train set
+    sample_weights = all_weights[:split_idx]
 
     # Entrenar modelo
     model = XGBoostRegimeModel(
