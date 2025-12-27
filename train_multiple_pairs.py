@@ -161,7 +161,7 @@ def generate_features(data: dict, symbol: str, config_path: str = 'config_15min.
 
     # 1. Features técnicas (1h)
     logger.info("📊 Generando features técnicas 1h...")
-    df = feature_engineer.add_technical_features(df, timeframe='1h')
+    df = feature_engineer.create_technical_features(df, timeframe='1h')
 
     # 2. Features macro (4h)
     if not df_4h.empty:
@@ -171,38 +171,19 @@ def generate_features(data: dict, symbol: str, config_path: str = 'config_15min.
     # 3. Features estadísticas (Hurst, Wavelet, FFT, etc.)
     if hasattr(feature_engineer, 'statistical_engine') and feature_engineer.statistical_engine:
         logger.info("🔬 Generando statistical features...")
-        df = feature_engineer.statistical_engine.compute_all_features(df, price_col='close')
+        try:
+            df = feature_engineer.statistical_engine.compute_all_features(df, price_col='close')
+            logger.info(f"   ✓ Statistical features: {len(df.columns)} columnas totales")
+        except Exception as e:
+            logger.warning(f"⚠️  Error generando statistical features: {e}")
 
-    # 4. Features externas (sentiment, derivatives, on-chain)
-    # NOTA: Limitamos a 5 noticias por par (NewsAPI)
-    logger.info("🌐 Generando features externas...")
-    try:
-        symbol_base = symbol.replace('USDT', '')  # ETHUSDT → ETH
+    # 4. Macro features (BTCDOM)
+    if not macro_df.empty:
+        logger.info("📊 Agregando BTCDOM features...")
+        df = feature_engineer.merge_macro_features(df, macro_df)
 
-        # Sentiment (limitado a 5 noticias)
-        if hasattr(feature_engineer, 'sentiment_engine') and feature_engineer.sentiment_engine:
-            df = feature_engineer.sentiment_engine.add_sentiment_features(
-                df,
-                symbol=symbol_base,
-                max_news=5  # LÍMITE CRÍTICO
-            )
-
-        # Derivatives (OI, Funding Rate)
-        if hasattr(feature_engineer, 'derivatives_engine') and feature_engineer.derivatives_engine:
-            df = feature_engineer.derivatives_engine.add_derivatives_features(
-                df,
-                symbol=symbol_base
-            )
-
-        # On-chain (si hay API key, sino usa simulados)
-        if hasattr(feature_engineer, 'onchain_engine') and feature_engineer.onchain_engine:
-            df = feature_engineer.onchain_engine.add_onchain_features(df)
-
-    except Exception as e:
-        logger.warning(f"⚠️  Error generando features externas: {e}")
-        logger.warning(f"   Continuando sin features externas...")
-
-    # 5. Agregar features faltantes con valor 0 (fallback)
+    # 5. Agregar features faltantes con valor 0 (para compatibilidad)
+    # Estas features normalmente vendrían de APIs externas
     required_external_features = [
         'funding_rate', 'open_interest_norm', 'oi_change',
         'Net_Flow_Z', 'BTCDOM_ROC', 'FinBERT_Score',
@@ -211,11 +192,11 @@ def generate_features(data: dict, symbol: str, config_path: str = 'config_15min.
 
     missing_features = [f for f in required_external_features if f not in df.columns]
     if missing_features:
-        logger.warning(f"⚠️  Agregando {len(missing_features)} features faltantes con valor 0")
+        logger.info(f"⚠️  Agregando {len(missing_features)} features externas con valor 0 (placeholder)")
         for feature in missing_features:
             df[feature] = 0.0
 
-    # 6. Eliminar filas con NaN (primer warmup de indicadores)
+    # 6. Eliminar filas con NaN (warmup de indicadores)
     initial_len = len(df)
     df = df.dropna()
     final_len = len(df)
