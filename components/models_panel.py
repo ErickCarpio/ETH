@@ -91,13 +91,17 @@ def render_models_table(models, model_loader):
         else:
             age_str = f"{int(hours_ago / 24)}d"
 
+        # Buscar accuracy en diferentes formatos
+        accuracy = meta.get('test_accuracy') or meta.get('accuracy') or meta.get('best_accuracy') or 0
+        f1_score = meta.get('test_f1') or meta.get('f1') or meta.get('f1_score') or 0
+
         table_data.append({
             'Symbol': model['symbol'],
-            'Accuracy': f"{meta.get('test_accuracy', 0) * 100:.1f}%",
-            'F1-Score': f"{meta.get('test_f1', 0):.3f}",
-            'Precision (LONG)': f"{meta.get('precision_long', 0) * 100:.1f}%",
-            'Recall (LONG)': f"{meta.get('recall_long', 0) * 100:.1f}%",
-            'Samples': meta.get('train_samples', 0),
+            'Accuracy': f"{accuracy * 100:.1f}%" if accuracy else "N/A",
+            'F1-Score': f"{f1_score:.3f}" if f1_score else "N/A",
+            'Trees': model.get('n_trees', 0),
+            'Size (MB)': f"{model['size_mb']:.2f}",
+            'Samples': meta.get('train_samples') or meta.get('samples', 0),
             'Age': age_str
         })
 

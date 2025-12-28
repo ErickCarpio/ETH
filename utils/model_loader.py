@@ -30,22 +30,44 @@ class ModelLoader:
 
         models = []
 
+        # Buscar archivos model_*.json (modelos XGBoost)
         for model_file in self.models_dir.glob('model_*.json'):
             try:
                 # Extraer símbolo del nombre
                 symbol = model_file.stem.replace('model_', '')
 
-                # Cargar metadata si existe
-                metadata_file = self.models_dir / f'{model_file.stem}_metadata.pkl'
-                metadata = {}
-
-                if metadata_file.exists():
-                    with open(metadata_file, 'rb') as f:
-                        metadata = pickle.load(f)
-
                 # Info del archivo
                 stat = model_file.stat()
                 last_modified = datetime.fromtimestamp(stat.st_mtime)
+
+                # Intentar leer el archivo JSON del modelo para obtener info básica
+                try:
+                    with open(model_file, 'r') as f:
+                        model_json = json.load(f)
+                        # Extraer info básica del modelo XGBoost
+                        n_trees = len(model_json.get('learner', {}).get('gradient_booster', {}).get('model', {}).get('trees', []))
+                except:
+                    n_trees = 0
+
+                # Cargar metadata si existe (archivo separado)
+                metadata_file = self.models_dir / f'model_{symbol}_metadata.pkl'
+                metadata = {}
+
+                if metadata_file.exists():
+                    try:
+                        with open(metadata_file, 'rb') as f:
+                            metadata = pickle.load(f)
+                    except Exception as e:
+                        logger.warning(f"No se pudo cargar metadata de {symbol}: {e}")
+
+                # También buscar metadata en formato JSON
+                metadata_json_file = self.models_dir / f'model_{symbol}_metadata.json'
+                if metadata_json_file.exists() and not metadata:
+                    try:
+                        with open(metadata_json_file, 'r') as f:
+                            metadata = json.load(f)
+                    except Exception as e:
+                        logger.warning(f"No se pudo cargar metadata JSON de {symbol}: {e}")
 
                 models.append({
                     'symbol': symbol,
@@ -53,6 +75,7 @@ class ModelLoader:
                     'metadata_file': str(metadata_file) if metadata_file.exists() else None,
                     'last_trained': last_modified,
                     'size_mb': stat.st_size / (1024 * 1024),
+                    'n_trees': n_trees,
                     'metadata': metadata
                 })
 
@@ -75,17 +98,26 @@ class ModelLoader:
         Returns:
             dict: Metadata del modelo o None
         """
+        # Buscar primero en pickle
         metadata_file = self.models_dir / f'model_{symbol}_metadata.pkl'
 
-        if not metadata_file.exists():
-            return None
+        if metadata_file.exists():
+            try:
+                with open(metadata_file, 'rb') as f:
+                    return pickle.load(f)
+            except Exception as e:
+                logger.error(f"Error cargando metadata pickle de {symbol}: {e}")
 
-        try:
-            with open(metadata_file, 'rb') as f:
-                return pickle.load(f)
-        except Exception as e:
-            logger.error(f"Error cargando metadata de {symbol}: {e}")
-            return None
+        # Si no existe pickle, buscar JSON
+        metadata_json_file = self.models_dir / f'model_{symbol}_metadata.json'
+        if metadata_json_file.exists():
+            try:
+                with open(metadata_json_file, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"Error cargando metadata JSON de {symbol}: {e}")
+
+        return None
 
     def get_training_summary(self):
         """
@@ -108,10 +140,22 @@ class ModelLoader:
         accuracies = []
         for model in models:
             meta = model.get('metadata', {})
+
+            # Buscar accuracy en diferentes formatos posibles
+            accuracy = None
             if 'test_accuracy' in meta:
+                accuracy = meta['test_accuracy']
+            elif 'accuracy' in meta:
+                accuracy = meta['accuracy']
+            elif 'best_accuracy' in meta:
+                accuracy = meta['best_accuracy']
+            elif 'val_accuracy' in meta:
+                accuracy = meta['val_accuracy']
+
+            if accuracy is not None:
                 accuracies.append({
                     'symbol': model['symbol'],
-                    'accuracy': meta['test_accuracy']
+                    'accuracy': accuracy
                 })
 
         best_model = max(accuracies, key=lambda x: x['accuracy']) if accuracies else None
