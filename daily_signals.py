@@ -45,12 +45,12 @@ class DailySignalsGenerator:
         self.feature_engineer = FeatureEngineer(self.config)
         logger.info("✓ FeatureEngineer inicializado")
 
-        # Inicializar exchange (demo para obtener datos)
-        self.exchange = ccxt.binanceusdm({
+        # Inicializar exchange (SPOT para datos)
+        self.exchange = ccxt.binance({
             'enableRateLimit': True,
-            'options': {'defaultType': 'future'}
+            'options': {'defaultType': 'spot'}
         })
-        logger.info("✓ Exchange inicializado")
+        logger.info("✓ Exchange inicializado (SPOT)")
         logger.info("✓ Modelos se cargarán bajo demanda (uno por par)")
 
     def load_model_for_pair(self, symbol):
@@ -228,182 +228,68 @@ class DailySignalsGenerator:
 
     def calculate_entry_levels(self, df, direction, current_price, confidence):
         """
-        Calcula niveles de entrada óptimos balanceando:
-        - Mejor precio (mayor R:R)
-        - Probabilidad de que el precio llegue ahí
-        - Expected Value = Probability × Risk:Reward
+        Calcula niveles de entrada, TP y SL usando PORCENTAJES FIJOS del config.
 
-        CRÍTICO: TP y SL son ABSOLUTOS (no % desde cada entrada)
-        Esto hace que entrar a mejor precio mejore el R:R
+        IMPORTANTE: Esto es CONSISTENTE con el entrenamiento del modelo.
+        El modelo aprendió a predecir movimientos de >2.5% en 12h,
+        NO aprendió sobre niveles óptimos de entrada.
+
+        Por lo tanto, usamos:
+        - Entrada = precio actual
+        - TP = ±take_profit_pct (5%)
+        - SL = ∓stop_loss_pct (2%)
         """
         try:
-            # Obtener soporte/resistencia
-            sr_levels = self.calculate_support_resistance(df)
-
             sl_pct = self.config['trading']['stop_loss_pct']
             tp_pct = self.config['trading']['take_profit_pct']
-
-            # Calcular ATR para medir volatilidad (probabilidad de alcanzar niveles)
-            atr = df['atr_14'].iloc[-1] if 'atr_14' in df.columns else current_price * 0.02
 
             entry_options = []
 
             if direction == 'LONG':
-                # CALCULAR TP Y SL OBJETIVOS ABSOLUTOS (NO RELATIVOS A CADA ENTRY)
-                # TP objetivo: Próxima resistencia o +tp_pct desde precio actual
-                if sr_levels['resistance']:
-                    # Tomar primera resistencia por encima del precio actual
-                    tp_target = next((r for r in sr_levels['resistance'] if r > current_price),
-                                    current_price * (1 + tp_pct))
-                else:
-                    tp_target = current_price * (1 + tp_pct)
+                # SIMPLE: Entry = precio actual, TP/SL = porcentajes fijos
+                entry = current_price
+                take_profit = current_price * (1 + tp_pct)
+                stop_loss = current_price * (1 - sl_pct)
 
-                # SL objetivo: Próximo soporte fuerte o -sl_pct desde precio actual
-                if sr_levels['support']:
-                    # Tomar último soporte por debajo del precio actual
-                    sl_target = next((s for s in reversed(sr_levels['support']) if s < current_price),
-                                    current_price * (1 - sl_pct))
-                else:
-                    sl_target = current_price * (1 - sl_pct)
-                # Para LONG, buscar niveles de ENTRADA entre SL y precio actual
-                potential_entries = [current_price]  # Opción 1: Entrada inmediata
+                # Risk:Reward
+                potential_gain = take_profit - entry
+                potential_loss = entry - stop_loss
+                risk_reward = potential_gain / potential_loss
 
-                # Agregar niveles de soporte cercanos (pero por ENCIMA del SL objetivo)
-                for support in sr_levels['support']:
-                    if sl_target < support < current_price:
-                        potential_entries.append(support)
-
-                # Agregar niveles psicológicos (números redondos)
-                price_magnitude = 10 ** (len(str(int(current_price))) - 1)
-                for multiplier in [0.95, 0.97, 0.98, 0.99]:
-                    psych_level = round(current_price * multiplier / price_magnitude) * price_magnitude
-                    if sl_target < psych_level < current_price:
-                        potential_entries.append(psych_level)
-
-                # Eliminar duplicados y ordenar
-                potential_entries = sorted(list(set(potential_entries)), reverse=True)
-
-                # Calcular expected value para cada entrada USANDO TP/SL ABSOLUTOS
-                for entry in potential_entries[:5]:  # Top 5 opciones
-                    # Verificar que entry esté entre SL y precio actual
-                    if not (sl_target < entry <= current_price):
-                        continue
-
-                    # Distancia del precio actual
-                    distance_pct = abs(entry - current_price) / current_price
-
-                    # Probabilidad de alcanzar (basada en distancia y ATR)
-                    distance_in_atr = (current_price - entry) / atr
-                    probability = confidence * np.exp(-distance_in_atr) if distance_in_atr >= 0 else confidence
-                    probability = min(probability, 1.0)
-
-                    # TP y SL ABSOLUTOS (iguales para todas las entradas)
-                    stop_loss = sl_target
-                    take_profit = tp_target
-
-                    # Risk:Reward MEJORA si entramos más abajo
-                    # R:R = (TP - Entry) / (Entry - SL)
-                    potential_gain = take_profit - entry
-                    potential_loss = entry - stop_loss
-
-                    if potential_loss <= 0:  # Entry está en o por debajo del SL
-                        continue
-
-                    risk_reward = potential_gain / potential_loss
-
-                    # Expected Value = Probability × R:R
-                    expected_value = probability * risk_reward
-
-                    entry_options.append({
-                        'entry': entry,
-                        'stop_loss': stop_loss,
-                        'take_profit': take_profit,
-                        'probability': probability,
-                        'risk_reward': risk_reward,
-                        'expected_value': expected_value,
-                        'distance_pct': distance_pct,
-                        'gain_pct': (take_profit - entry) / entry,
-                        'loss_pct': (entry - stop_loss) / entry
-                    })
+                entry_options.append({
+                    'entry': entry,
+                    'stop_loss': stop_loss,
+                    'take_profit': take_profit,
+                    'probability': confidence,
+                    'risk_reward': risk_reward,
+                    'expected_value': confidence * risk_reward,
+                    'distance_pct': 0.0,  # Entrada inmediata
+                    'gain_pct': tp_pct,
+                    'loss_pct': sl_pct
+                })
 
             else:  # SHORT
-                # CALCULAR TP Y SL OBJETIVOS ABSOLUTOS (NO RELATIVOS A CADA ENTRY)
-                # TP objetivo: Próximo soporte o -tp_pct desde precio actual
-                if sr_levels['support']:
-                    # Tomar primer soporte por debajo del precio actual
-                    tp_target = next((s for s in reversed(sr_levels['support']) if s < current_price),
-                                    current_price * (1 - tp_pct))
-                else:
-                    tp_target = current_price * (1 - tp_pct)
+                # SIMPLE: Entry = precio actual, TP/SL = porcentajes fijos
+                entry = current_price
+                take_profit = current_price * (1 - tp_pct)
+                stop_loss = current_price * (1 + sl_pct)
 
-                # SL objetivo: Próxima resistencia fuerte o +sl_pct desde precio actual
-                if sr_levels['resistance']:
-                    # Tomar primera resistencia por encima del precio actual
-                    sl_target = next((r for r in sr_levels['resistance'] if r > current_price),
-                                    current_price * (1 + sl_pct))
-                else:
-                    sl_target = current_price * (1 + sl_pct)
+                # Risk:Reward
+                potential_gain = entry - take_profit
+                potential_loss = stop_loss - entry
+                risk_reward = potential_gain / potential_loss
 
-                # Para SHORT, buscar niveles de ENTRADA entre precio actual y SL
-                potential_entries = [current_price]  # Opción 1: Entrada inmediata
-
-                # Agregar niveles de resistencia cercanos (pero por DEBAJO del SL objetivo)
-                for resistance in sr_levels['resistance']:
-                    if current_price < resistance < sl_target:
-                        potential_entries.append(resistance)
-
-                # Agregar niveles psicológicos
-                price_magnitude = 10 ** (len(str(int(current_price))) - 1)
-                for multiplier in [1.01, 1.02, 1.03, 1.05]:
-                    psych_level = round(current_price * multiplier / price_magnitude) * price_magnitude
-                    if current_price < psych_level < sl_target:
-                        potential_entries.append(psych_level)
-
-                # Eliminar duplicados y ordenar
-                potential_entries = sorted(list(set(potential_entries)))
-
-                # Calcular expected value para cada entrada USANDO TP/SL ABSOLUTOS
-                for entry in potential_entries[:5]:  # Top 5 opciones
-                    # Verificar que entry esté entre precio actual y SL
-                    if not (current_price <= entry < sl_target):
-                        continue
-
-                    # Distancia del precio actual
-                    distance_pct = abs(entry - current_price) / current_price
-
-                    # Probabilidad de alcanzar
-                    distance_in_atr = (entry - current_price) / atr
-                    probability = confidence * np.exp(-distance_in_atr) if distance_in_atr >= 0 else confidence
-                    probability = min(probability, 1.0)
-
-                    # TP y SL ABSOLUTOS (iguales para todas las entradas)
-                    stop_loss = sl_target
-                    take_profit = tp_target
-
-                    # Risk:Reward MEJORA si entramos más arriba (en SHORT)
-                    # R:R = (Entry - TP) / (SL - Entry)
-                    potential_gain = entry - take_profit
-                    potential_loss = stop_loss - entry
-
-                    if potential_loss <= 0:  # Entry está en o por encima del SL
-                        continue
-
-                    risk_reward = potential_gain / potential_loss
-
-                    # Expected Value
-                    expected_value = probability * risk_reward
-
-                    entry_options.append({
-                        'entry': entry,
-                        'stop_loss': stop_loss,
-                        'take_profit': take_profit,
-                        'probability': probability,
-                        'risk_reward': risk_reward,
-                        'expected_value': expected_value,
-                        'distance_pct': distance_pct,
-                        'gain_pct': (entry - take_profit) / entry,
-                        'loss_pct': (stop_loss - entry) / entry
-                    })
+                entry_options.append({
+                    'entry': entry,
+                    'stop_loss': stop_loss,
+                    'take_profit': take_profit,
+                    'probability': confidence,
+                    'risk_reward': risk_reward,
+                    'expected_value': confidence * risk_reward,
+                    'distance_pct': 0.0,  # Entrada inmediata
+                    'gain_pct': tp_pct,
+                    'loss_pct': sl_pct
+                })
 
             # Ordenar por expected value (mayor a menor)
             entry_options.sort(key=lambda x: x['expected_value'], reverse=True)
