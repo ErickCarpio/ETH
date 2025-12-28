@@ -331,10 +331,34 @@ def train_model_for_pair(features_df: pd.DataFrame, symbol: str, config: dict) -
     # Evaluar en test set
     logger.info(f"\n📊 EVALUACIÓN EN TEST SET:")
     y_pred = model.predict(X_test)
-    from sklearn.metrics import classification_report
-    print(classification_report(y_test, y_pred, target_names=['SHORT', 'LONG']))
+    from sklearn.metrics import classification_report, accuracy_score, precision_recall_fscore_support
 
-    return model
+    # Generar report completo
+    report_text = classification_report(y_test, y_pred, target_names=['SHORT', 'LONG'])
+    print(report_text)
+
+    # Calcular métricas individuales
+    accuracy = accuracy_score(y_test, y_pred)
+    precision, recall, f1, support = precision_recall_fscore_support(
+        y_test, y_pred, average=None, labels=[0, 1]
+    )
+
+    # Crear diccionario de métricas
+    metrics = {
+        'accuracy': float(accuracy),
+        'precision_short': float(precision[0]),
+        'precision_long': float(precision[1]),
+        'recall_short': float(recall[0]),
+        'recall_long': float(recall[1]),
+        'f1_short': float(f1[0]),
+        'f1_long': float(f1[1]),
+        'support_short': int(support[0]),
+        'support_long': int(support[1]),
+        'test_samples': int(len(y_test)),
+        'train_samples': int(len(y_train))
+    }
+
+    return model, metrics
 
 
 # =====================================================================
@@ -407,9 +431,9 @@ async def train_all_pairs():
                 continue
 
             # 4. Entrenar modelo
-            model = train_model_for_pair(labeled_df, symbol, TRAINING_CONFIG)
+            result = train_model_for_pair(labeled_df, symbol, TRAINING_CONFIG)
 
-            if model is None:
+            if result is None or (isinstance(result, tuple) and result[0] is None):
                 logger.error(f"❌ Fallo en entrenamiento de {symbol}. Saltando...")
                 training_results.append({
                     'symbol': symbol,
@@ -418,18 +442,33 @@ async def train_all_pairs():
                 })
                 continue
 
+            # Desempaquetar resultado
+            if isinstance(result, tuple):
+                model, metrics = result
+            else:
+                model = result
+                metrics = {}
+
             # 5. Guardar modelo con nombre del par
             model_filename = f"model_{symbol}.json"
             model.save_model(model_filename)
 
+            # 6. Guardar métricas en JSON
+            metrics_filename = models_dir / f"model_{symbol}_metadata.json"
+            with open(metrics_filename, 'w') as f:
+                json.dump(metrics, f, indent=2)
+
             logger.info(f"✅ Modelo guardado: {models_dir / model_filename}")
+            logger.info(f"✅ Métricas guardadas: {metrics_filename}")
 
             training_results.append({
                 'symbol': symbol,
                 'status': 'SUCCESS',
                 'model_file': model_filename,
                 'samples': len(labeled_df),
-                'features': len(labeled_df.columns) - 4  # Excluir regime y forward_*
+                'features': len(labeled_df.columns) - 4,  # Excluir regime y forward_*
+                'accuracy': metrics.get('accuracy', 0),
+                'test_samples': metrics.get('test_samples', 0)
             })
 
             # Rate limiting entre pares (respetar APIs)
