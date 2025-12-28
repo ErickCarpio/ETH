@@ -773,6 +773,211 @@ def load_config():
         return {}
 
 
+st.sidebar.title("⚙️ Control Panel")
+
+# Estado del bot
+st.sidebar.header("🤖 Estado del Bot")
+bot_status = st.sidebar.empty()
+bot_status.success("🟢 Bot Iniciado" if st.session_state.get('bot_running', False) else "🔴 Bot Detenido")
+
+# Controles
+col1, col2 = st.sidebar.columns(2)
+if col1.button("▶️ Iniciar", width="stretch"):
+    start_trading_bot()
+    st.rerun()
+
+if col2.button("⏸️ Detener", width="stretch"):
+    stop_trading_bot()
+    st.rerun()
+
+# Información de Futuros
+st.sidebar.header("⚙️ Configuración Futuros")
+config = load_config()
+trading_config = config.get('trading', {})
+exchange_config = config.get('exchange', {})
+
+# Selector de modo de trading
+trading_mode = st.sidebar.radio(
+    "Modo de Trading",
+    ["Testnet Binance (Dinero Ficticio)", "Paper Trading (Simulado Local)", "Real Trading (Dinero Real)"],
+    index=0,
+    help="Testnet = Binance real con dinero ficticio | Paper = Simulación local | Real = Dinero real"
+)
+
+# Indicadores visuales y configuración
+if trading_mode == "Testnet Binance (Dinero Ficticio)":
+    st.sidebar.success("🧪 Testnet de Binance (Dinero Ficticio)")
+    is_paper_trading = False
+    is_testnet = True
+    st.sidebar.info("Conecta a testnet.binancefuture.com con dinero ficticio de Binance")
+elif trading_mode == "Paper Trading (Simulado Local)":
+    st.sidebar.success("🖥️ Paper Trading (Simulación Local)")
+    is_paper_trading = True
+    is_testnet = False
+    st.sidebar.info("Simula trades localmente sin conectar a Binance")
+else:
+    st.sidebar.error("🔥 REAL TRADING (Dinero Real)")
+    is_paper_trading = False
+    is_testnet = False
+    st.sidebar.warning("⚠️ USA DINERO REAL - Ten mucho cuidado")
+
+# Mostrar configuración de futuros
+st.sidebar.subheader("Parámetros de Futuros")
+
+# Leverage selector
+leverage = st.sidebar.select_slider(
+    "Apalancamiento (Leverage)",
+    options=[1, 2, 3, 5, 10, 20, 50],
+    value=trading_config.get('leverage', 1),
+    help="1x = Sin apalancamiento (más seguro), 20x = 20 veces tu capital (MUY RIESGOSO)"
+)
+
+# Margin mode selector
+margin_mode = st.sidebar.radio(
+    "Tipo de Margen",
+    ["ISOLATED", "CROSS"],
+    index=0 if trading_config.get('margin_mode', 'ISOLATED') == 'ISOLATED' else 1,
+    help="ISOLATED = solo pierdes esa posición | CROSS = puedes perder todo"
+)
+
+# Position size
+position_size = st.sidebar.number_input(
+    "Tamaño de Posición (USD)",
+    min_value=10,
+    max_value=1000,
+    value=trading_config.get('position_size_usd', 100),
+    step=10,
+    help="Cantidad en USD por cada trade"
+)
+
+# Mostrar resumen de configuración
+mode_display = "Testnet (Ficticio)" if is_testnet and not is_paper_trading else ("Paper (Simulado)" if is_paper_trading else "REAL (Dinero Real)")
+st.sidebar.info(f"""
+**Mercado:** Futuros (Futures)
+**Símbolo:** {exchange_config.get('symbol', 'ETHUSDT')}
+**Modo:** {mode_display}
+**Apalancamiento:** {leverage}x
+**Margen:** {margin_mode}
+**Posición:** ${position_size} USD
+""")
+
+# Si modo testnet, mostrar campos para API keys
+if is_testnet and not is_paper_trading:
+    st.sidebar.subheader("🔑 API Keys Testnet")
+
+    testnet_key = st.sidebar.text_input(
+        "Testnet API Key",
+        value=exchange_config.get('testnet_api_key', ''),
+        type="password",
+        help="Obtén keys en: https://testnet.binancefuture.com"
+    )
+
+    testnet_secret = st.sidebar.text_input(
+        "Testnet API Secret",
+        value=exchange_config.get('testnet_api_secret', ''),
+        type="password"
+    )
+
+    if not testnet_key or not testnet_secret:
+        st.sidebar.warning("⚠️ Configura las API keys de Testnet para operar")
+        st.sidebar.markdown("[Obtener keys de Testnet](https://testnet.binancefuture.com)")
+
+# Advertencia de riesgo si leverage > 1
+if leverage > 1:
+    risk_exposure = position_size * leverage
+    st.sidebar.warning(f"⚠️ RIESGO: Con {leverage}x leverage y ${position_size}, controlas ${risk_exposure} de ETH")
+
+    # Calcular precio de liquidación aproximado
+    liquidation_move = (1 / leverage) * 100
+    st.sidebar.error(f"🚨 Liquidación si ETH se mueve {liquidation_move:.1f}% en tu contra")
+
+# Guardar configuración actualizada en session_state
+if 'trading_settings' not in st.session_state:
+    st.session_state.trading_settings = {}
+
+st.session_state.trading_settings.update({
+    'leverage': leverage,
+    'margin_mode': margin_mode,
+    'position_size_usd': position_size,
+    'is_paper_trading': is_paper_trading,
+    'is_testnet': is_testnet
+})
+
+# Botón para aplicar cambios
+if st.sidebar.button("💾 Aplicar Cambios", type="primary"):
+    # Guardar en config file
+    config['trading']['leverage'] = leverage
+    config['trading']['margin_mode'] = margin_mode
+    config['trading']['position_size_usd'] = position_size
+    config['exchange']['paper_trading'] = is_paper_trading
+    config['exchange']['testnet'] = is_testnet
+
+    # Si es testnet, guardar API keys
+    if is_testnet and not is_paper_trading:
+        config['exchange']['testnet_api_key'] = testnet_key
+        config['exchange']['testnet_api_secret'] = testnet_secret
+
+    with open('config_15min.json', 'w') as f:
+        json.dump(config, f, indent=2)
+
+    st.sidebar.success("✅ Configuración guardada!")
+    st.sidebar.info("⚠️ Reinicia el bot para aplicar cambios")
+
+# Configuración
+st.sidebar.header("📊 Parámetros de Trading")
+
+threshold = st.sidebar.slider(
+    "Threshold de Confianza",
+    min_value=0.5,
+    max_value=0.95,
+    value=config.get('trading', {}).get('prediction_threshold', 0.70),
+    step=0.05
+)
+
+sl_pct = st.sidebar.slider(
+    "Stop Loss %",
+    min_value=0.01,
+    max_value=0.05,
+    value=config.get('trading', {}).get('stop_loss_pct', 0.02),
+    step=0.005,
+    format="%.3f"
+)
+
+tp_pct = st.sidebar.slider(
+    "Take Profit %",
+    min_value=0.02,
+    max_value=0.10,
+    value=config.get('trading', {}).get('take_profit_pct', 0.05),
+    step=0.005,
+    format="%.3f"
+)
+
+# Timeframe selector
+st.sidebar.header("⏱️ Timeframe")
+timeframe_options = {
+    "6 horas": 6,
+    "12 horas": 12,
+    "1 día": 24,
+    "2 días": 48,
+    "1 semana": 168,
+    "2 semanas": 336,
+    "1 mes": 720,
+    "3 meses": 2160,
+    "Todo": 999999
+}
+selected_tf = st.sidebar.selectbox(
+    "Mostrar últimas:",
+    list(timeframe_options.keys()),
+    index=2
+)
+hours_to_show = timeframe_options[selected_tf]
+
+# Auto-refresh
+auto_refresh = st.sidebar.checkbox("🔄 Auto-actualizar", value=True)
+if auto_refresh:
+    refresh_rate = st.sidebar.slider("Cada (segundos):", 5, 60, 10)
+
+
 # =================== TABS STRUCTURE ===================
 
 # Crear tabs
@@ -787,214 +992,8 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # =================== TAB 1: DASHBOARD ===================
 
 with tab1:
-    # =================== SIDEBAR ===================
-
-    st.sidebar.title("⚙️ Control Panel")
-    
-    # Estado del bot
-    st.sidebar.header("🤖 Estado del Bot")
-    bot_status = st.sidebar.empty()
-    bot_status.success("🟢 Bot Iniciado" if st.session_state.get('bot_running', False) else "🔴 Bot Detenido")
-    
-    # Controles
-    col1, col2 = st.sidebar.columns(2)
-    if col1.button("▶️ Iniciar", width="stretch"):
-        start_trading_bot()
-        st.rerun()
-    
-    if col2.button("⏸️ Detener", width="stretch"):
-        stop_trading_bot()
-        st.rerun()
-    
-    # Información de Futuros
-    st.sidebar.header("⚙️ Configuración Futuros")
-    config = load_config()
-    trading_config = config.get('trading', {})
-    exchange_config = config.get('exchange', {})
-    
-    # Selector de modo de trading
-    trading_mode = st.sidebar.radio(
-        "Modo de Trading",
-        ["Testnet Binance (Dinero Ficticio)", "Paper Trading (Simulado Local)", "Real Trading (Dinero Real)"],
-        index=0,
-        help="Testnet = Binance real con dinero ficticio | Paper = Simulación local | Real = Dinero real"
-    )
-    
-    # Indicadores visuales y configuración
-    if trading_mode == "Testnet Binance (Dinero Ficticio)":
-        st.sidebar.success("🧪 Testnet de Binance (Dinero Ficticio)")
-        is_paper_trading = False
-        is_testnet = True
-        st.sidebar.info("Conecta a testnet.binancefuture.com con dinero ficticio de Binance")
-    elif trading_mode == "Paper Trading (Simulado Local)":
-        st.sidebar.success("🖥️ Paper Trading (Simulación Local)")
-        is_paper_trading = True
-        is_testnet = False
-        st.sidebar.info("Simula trades localmente sin conectar a Binance")
-    else:
-        st.sidebar.error("🔥 REAL TRADING (Dinero Real)")
-        is_paper_trading = False
-        is_testnet = False
-        st.sidebar.warning("⚠️ USA DINERO REAL - Ten mucho cuidado")
-    
-    # Mostrar configuración de futuros
-    st.sidebar.subheader("Parámetros de Futuros")
-    
-    # Leverage selector
-    leverage = st.sidebar.select_slider(
-        "Apalancamiento (Leverage)",
-        options=[1, 2, 3, 5, 10, 20, 50],
-        value=trading_config.get('leverage', 1),
-        help="1x = Sin apalancamiento (más seguro), 20x = 20 veces tu capital (MUY RIESGOSO)"
-    )
-    
-    # Margin mode selector
-    margin_mode = st.sidebar.radio(
-        "Tipo de Margen",
-        ["ISOLATED", "CROSS"],
-        index=0 if trading_config.get('margin_mode', 'ISOLATED') == 'ISOLATED' else 1,
-        help="ISOLATED = solo pierdes esa posición | CROSS = puedes perder todo"
-    )
-    
-    # Position size
-    position_size = st.sidebar.number_input(
-        "Tamaño de Posición (USD)",
-        min_value=10,
-        max_value=1000,
-        value=trading_config.get('position_size_usd', 100),
-        step=10,
-        help="Cantidad en USD por cada trade"
-    )
-    
-    # Mostrar resumen de configuración
-    mode_display = "Testnet (Ficticio)" if is_testnet and not is_paper_trading else ("Paper (Simulado)" if is_paper_trading else "REAL (Dinero Real)")
-    st.sidebar.info(f"""
-    **Mercado:** Futuros (Futures)
-    **Símbolo:** {exchange_config.get('symbol', 'ETHUSDT')}
-    **Modo:** {mode_display}
-    **Apalancamiento:** {leverage}x
-    **Margen:** {margin_mode}
-    **Posición:** ${position_size} USD
-    """)
-    
-    # Si modo testnet, mostrar campos para API keys
-    if is_testnet and not is_paper_trading:
-        st.sidebar.subheader("🔑 API Keys Testnet")
-    
-        testnet_key = st.sidebar.text_input(
-            "Testnet API Key",
-            value=exchange_config.get('testnet_api_key', ''),
-            type="password",
-            help="Obtén keys en: https://testnet.binancefuture.com"
-        )
-    
-        testnet_secret = st.sidebar.text_input(
-            "Testnet API Secret",
-            value=exchange_config.get('testnet_api_secret', ''),
-            type="password"
-        )
-    
-        if not testnet_key or not testnet_secret:
-            st.sidebar.warning("⚠️ Configura las API keys de Testnet para operar")
-            st.sidebar.markdown("[Obtener keys de Testnet](https://testnet.binancefuture.com)")
-    
-    # Advertencia de riesgo si leverage > 1
-    if leverage > 1:
-        risk_exposure = position_size * leverage
-        st.sidebar.warning(f"⚠️ RIESGO: Con {leverage}x leverage y ${position_size}, controlas ${risk_exposure} de ETH")
-    
-        # Calcular precio de liquidación aproximado
-        liquidation_move = (1 / leverage) * 100
-        st.sidebar.error(f"🚨 Liquidación si ETH se mueve {liquidation_move:.1f}% en tu contra")
-    
-    # Guardar configuración actualizada en session_state
-    if 'trading_settings' not in st.session_state:
-        st.session_state.trading_settings = {}
-    
-    st.session_state.trading_settings.update({
-        'leverage': leverage,
-        'margin_mode': margin_mode,
-        'position_size_usd': position_size,
-        'is_paper_trading': is_paper_trading,
-        'is_testnet': is_testnet
-    })
-    
-    # Botón para aplicar cambios
-    if st.sidebar.button("💾 Aplicar Cambios", type="primary"):
-        # Guardar en config file
-        config['trading']['leverage'] = leverage
-        config['trading']['margin_mode'] = margin_mode
-        config['trading']['position_size_usd'] = position_size
-        config['exchange']['paper_trading'] = is_paper_trading
-        config['exchange']['testnet'] = is_testnet
-    
-        # Si es testnet, guardar API keys
-        if is_testnet and not is_paper_trading:
-            config['exchange']['testnet_api_key'] = testnet_key
-            config['exchange']['testnet_api_secret'] = testnet_secret
-    
-        with open('config_15min.json', 'w') as f:
-            json.dump(config, f, indent=2)
-    
-        st.sidebar.success("✅ Configuración guardada!")
-        st.sidebar.info("⚠️ Reinicia el bot para aplicar cambios")
-    
-    # Configuración
-    st.sidebar.header("📊 Parámetros de Trading")
-    
-    threshold = st.sidebar.slider(
-        "Threshold de Confianza",
-        min_value=0.5,
-        max_value=0.95,
-        value=config.get('trading', {}).get('prediction_threshold', 0.70),
-        step=0.05
-    )
-    
-    sl_pct = st.sidebar.slider(
-        "Stop Loss %",
-        min_value=0.01,
-        max_value=0.05,
-        value=config.get('trading', {}).get('stop_loss_pct', 0.02),
-        step=0.005,
-        format="%.3f"
-    )
-    
-    tp_pct = st.sidebar.slider(
-        "Take Profit %",
-        min_value=0.02,
-        max_value=0.10,
-        value=config.get('trading', {}).get('take_profit_pct', 0.05),
-        step=0.005,
-        format="%.3f"
-    )
-    
-    # Timeframe selector
-    st.sidebar.header("⏱️ Timeframe")
-    timeframe_options = {
-        "6 horas": 6,
-        "12 horas": 12,
-        "1 día": 24,
-        "2 días": 48,
-        "1 semana": 168,
-        "2 semanas": 336,
-        "1 mes": 720,
-        "3 meses": 2160,
-        "Todo": 999999
-    }
-    selected_tf = st.sidebar.selectbox(
-        "Mostrar últimas:",
-        list(timeframe_options.keys()),
-        index=2
-    )
-    hours_to_show = timeframe_options[selected_tf]
-    
-    # Auto-refresh
-    auto_refresh = st.sidebar.checkbox("🔄 Auto-actualizar", value=True)
-    if auto_refresh:
-        refresh_rate = st.sidebar.slider("Cada (segundos):", 5, 60, 10)
-    
     # =================== HEADER ===================
-    
+
     st.title("📈 ETH Trading Bot Dashboard")
     st.markdown("---")
     
