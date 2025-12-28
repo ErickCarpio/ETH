@@ -63,6 +63,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# =================== IMPORTAR COMPONENTES ===================
+
+# Importar paneles de components/
+from components.training_panel import render_training_panel
+from components.signals_panel import render_signals_panel
+from components.models_panel import render_models_panel
+from components.backtest_panel import render_backtest_panel
+
 # =================== TRADING BOT CLASS ===================
 
 class LiveTradingBot:
@@ -764,7 +772,22 @@ def load_config():
     except:
         return {}
 
-# =================== SIDEBAR ===================
+
+# =================== TABS STRUCTURE ===================
+
+# Crear tabs
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📊 Dashboard",
+    "🧠 Training",
+    "📡 Signals",
+    "🔧 Models",
+    "📈 Backtest"
+])
+
+# =================== TAB 1: DASHBOARD ===================
+
+with tab1:
+    # =================== SIDEBAR ===================
 
 st.sidebar.title("⚙️ Control Panel")
 
@@ -1343,3 +1366,24 @@ col3.caption(f"🤖 Estado: {'🟢 OPERANDO' if st.session_state.get('bot_runnin
 if auto_refresh:
     time.sleep(refresh_rate)
     st.rerun()
+
+
+# =================== TAB 2: TRAINING ===================
+
+with tab2:
+    render_training_panel()
+
+# =================== TAB 3: SIGNALS ===================
+
+with tab3:
+    render_signals_panel()
+
+# =================== TAB 4: MODELS ===================
+
+with tab4:
+    render_models_panel()
+
+# =================== TAB 5: BACKTEST ===================
+
+with tab5:
+    render_backtest_panel()
