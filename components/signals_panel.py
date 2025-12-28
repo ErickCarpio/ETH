@@ -62,9 +62,10 @@ def generate_signals(num_pairs, min_confidence):
         # Por ahora, mostrar instrucciones
         st.code(f"""
 # Ejecuta este comando en terminal:
-python daily_signals.py --pairs {num_pairs} --min-confidence {min_confidence}
+python daily_signals.py --pairs {num_pairs}
 
 # Las señales se guardarán en: signals/signals_YYYYMMDD_HHMMSS.csv
+# El threshold mínimo ({min_confidence}) se puede configurar en config_15min.json
         """, language="bash")
 
         st.success("✅ Revisa el terminal para ver el progreso")
