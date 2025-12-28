@@ -94,14 +94,15 @@ class DailySignalsGenerator:
             return None
 
     async def get_top_pairs(self, limit=20):
-        """Obtiene los top N pares por volumen de Binance Futures"""
+        """Obtiene los top N pares por volumen de Binance Spot"""
         logger.info(f"📊 Obteniendo top {limit} pares por volumen...")
 
         try:
             markets = await self.exchange.load_markets()
-            futures_markets = [
+            # Usar spot markets en lugar de futures
+            spot_markets = [
                 market for market in markets.values()
-                if market['type'] == 'future' and market['quote'] == 'USDT' and market['active']
+                if market['type'] == 'spot' and market['quote'] == 'USDT' and market['active']
             ]
 
             # Obtener tickers para volumen
@@ -109,7 +110,7 @@ class DailySignalsGenerator:
 
             # Filtrar y ordenar por volumen
             pairs_with_volume = []
-            for market in futures_markets:
+            for market in spot_markets:
                 symbol = market['symbol']
                 if symbol in tickers and tickers[symbol].get('quoteVolume'):
                     pairs_with_volume.append({
