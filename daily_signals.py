@@ -94,54 +94,22 @@ class DailySignalsGenerator:
             return None
 
     async def get_top_pairs(self, limit=20):
-        """Obtiene los top N pares por volumen de Binance Spot"""
-        logger.info(f"📊 Obteniendo top {limit} pares por volumen...")
+        """Obtiene los pares con modelos entrenados"""
+        logger.info(f"📊 Usando pares con modelos entrenados...")
 
-        try:
-            markets = await self.exchange.load_markets()
-            # Usar spot markets en lugar de futures
-            spot_markets = [
-                market for market in markets.values()
-                if market['type'] == 'spot' and market['quote'] == 'USDT' and market['active']
-            ]
+        # Lista de pares que fueron entrenados
+        trained_pairs = [
+            'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'ADA/USDT',
+            'DOGE/USDT', 'DOT/USDT', 'LINK/USDT', 'UNI/USDT', 'ATOM/USDT',
+            'AVAX/USDT', 'LTC/USDT', 'ETC/USDT', 'FIL/USDT', 'APT/USDT',
+            'ARB/USDT', 'OP/USDT', 'INJ/USDT', 'SUI/USDT'
+        ]
 
-            # Obtener tickers para volumen
-            tickers = await self.exchange.fetch_tickers()
+        # Limitar a los primeros N pares
+        selected_pairs = trained_pairs[:limit]
 
-            # Filtrar y ordenar por volumen
-            pairs_with_volume = []
-            for market in spot_markets:
-                symbol = market['symbol']
-                if symbol in tickers and tickers[symbol].get('quoteVolume'):
-                    pairs_with_volume.append({
-                        'symbol': symbol,
-                        'volume': tickers[symbol]['quoteVolume']
-                    })
-
-            # Ordenar por volumen descendente
-            pairs_with_volume.sort(key=lambda x: x['volume'], reverse=True)
-
-            # EXCLUIR BTC y tomar siguientes N pares
-            top_pairs = []
-            for p in pairs_with_volume:
-                # Excluir BTC (domina mucho el portfolio)
-                if 'BTC' not in p['symbol']:
-                    top_pairs.append(p['symbol'])
-                    if len(top_pairs) >= limit:
-                        break
-
-            logger.info(f"✓ Top {len(top_pairs)} pares (sin BTC): {', '.join(top_pairs[:5])}...")
-            return top_pairs
-
-        except Exception as e:
-            logger.error(f"Error obteniendo pares: {e}")
-            # Fallback a pares conocidos
-            return [
-                'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT',
-                'ADA/USDT', 'DOGE/USDT', 'AVAX/USDT', 'MATIC/USDT', 'DOT/USDT',
-                'UNI/USDT', 'LINK/USDT', 'ATOM/USDT', 'LTC/USDT', 'BCH/USDT',
-                'NEAR/USDT', 'APT/USDT', 'ARB/USDT', 'OP/USDT', 'FIL/USDT'
-            ]
+        logger.info(f"✓ {len(selected_pairs)} pares seleccionados: {', '.join(selected_pairs[:5])}...")
+        return selected_pairs
 
     async def fetch_pair_data(self, symbol, timeframe='1h', limit=350):
         """Descarga datos históricos para un par"""
