@@ -1370,19 +1370,43 @@ with tab1:
 # =================== TAB 2: TRAINING ===================
 
 with tab2:
-    render_training_panel()
+    try:
+        render_training_panel()
+    except Exception as e:
+        st.error(f"❌ Error en Training Panel: {str(e)}")
+        st.code(f"{type(e).__name__}: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
 
 # =================== TAB 3: SIGNALS ===================
 
 with tab3:
-    render_signals_panel()
+    try:
+        render_signals_panel()
+    except Exception as e:
+        st.error(f"❌ Error en Signals Panel: {str(e)}")
+        st.code(f"{type(e).__name__}: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
 
 # =================== TAB 4: MODELS ===================
 
 with tab4:
-    render_models_panel()
+    try:
+        render_models_panel()
+    except Exception as e:
+        st.error(f"❌ Error en Models Panel: {str(e)}")
+        st.code(f"{type(e).__name__}: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
 
 # =================== TAB 5: BACKTEST ===================
 
 with tab5:
-    render_backtest_panel()
+    try:
+        render_backtest_panel()
+    except Exception as e:
+        st.error(f"❌ Error en Backtest Panel: {str(e)}")
+        st.code(f"{type(e).__name__}: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
