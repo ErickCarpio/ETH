@@ -66,10 +66,18 @@ st.markdown("""
 # =================== IMPORTAR COMPONENTES ===================
 
 # Importar paneles de components/
-from components.training_panel import render_training_panel
-from components.signals_panel import render_signals_panel
-from components.models_panel import render_models_panel
-from components.backtest_panel import render_backtest_panel
+try:
+    from components.training_panel import render_training_panel
+    from components.signals_panel import render_signals_panel
+    from components.models_panel import render_models_panel
+    from components.backtest_panel import render_backtest_panel
+    _panels_loaded = True
+    _panels_error = None
+except Exception as e:
+    _panels_loaded = False
+    _panels_error = str(e)
+    import traceback
+    _panels_traceback = traceback.format_exc()
 
 # =================== TRADING BOT CLASS ===================
 
@@ -1370,43 +1378,59 @@ with tab1:
 # =================== TAB 2: TRAINING ===================
 
 with tab2:
-    try:
-        render_training_panel()
-    except Exception as e:
-        st.error(f"❌ Error en Training Panel: {str(e)}")
-        st.code(f"{type(e).__name__}: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
+    if not _panels_loaded:
+        st.error(f"❌ Error cargando paneles: {_panels_error}")
+        st.code(_panels_traceback)
+    else:
+        try:
+            render_training_panel()
+        except Exception as e:
+            st.error(f"❌ Error en Training Panel: {str(e)}")
+            st.code(f"{type(e).__name__}: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
 
 # =================== TAB 3: SIGNALS ===================
 
 with tab3:
-    try:
-        render_signals_panel()
-    except Exception as e:
-        st.error(f"❌ Error en Signals Panel: {str(e)}")
-        st.code(f"{type(e).__name__}: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
+    if not _panels_loaded:
+        st.error(f"❌ Error cargando paneles: {_panels_error}")
+        st.code(_panels_traceback)
+    else:
+        try:
+            render_signals_panel()
+        except Exception as e:
+            st.error(f"❌ Error en Signals Panel: {str(e)}")
+            st.code(f"{type(e).__name__}: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
 
 # =================== TAB 4: MODELS ===================
 
 with tab4:
-    try:
-        render_models_panel()
-    except Exception as e:
-        st.error(f"❌ Error en Models Panel: {str(e)}")
-        st.code(f"{type(e).__name__}: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
+    if not _panels_loaded:
+        st.error(f"❌ Error cargando paneles: {_panels_error}")
+        st.code(_panels_traceback)
+    else:
+        try:
+            render_models_panel()
+        except Exception as e:
+            st.error(f"❌ Error en Models Panel: {str(e)}")
+            st.code(f"{type(e).__name__}: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
 
 # =================== TAB 5: BACKTEST ===================
 
 with tab5:
-    try:
-        render_backtest_panel()
-    except Exception as e:
-        st.error(f"❌ Error en Backtest Panel: {str(e)}")
-        st.code(f"{type(e).__name__}: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
+    if not _panels_loaded:
+        st.error(f"❌ Error cargando paneles: {_panels_error}")
+        st.code(_panels_traceback)
+    else:
+        try:
+            render_backtest_panel()
+        except Exception as e:
+            st.error(f"❌ Error en Backtest Panel: {str(e)}")
+            st.code(f"{type(e).__name__}: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
