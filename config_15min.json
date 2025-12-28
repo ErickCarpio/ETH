@@ -12,8 +12,8 @@
     "_paper_trading_help": "true = Simulación local (sin conexión) | false = Conectar a exchange",
 
     "_comment": "--- DEMO BINANCE (demo.binance.com) - Dinero Ficticio ---",
-    "testnet_api_key": "",
-    "testnet_api_secret": "",
+    "testnet_api_key": "0wovgYaYitaQX5RWFr2hmegDsvtoPFMEMI2IMy8nx91HrxrR7y5GyPXZqSTGDMQA",
+    "testnet_api_secret": "wBiMJGFDaf84eE45eUJFOh56y8zCa39RBGpZaRikEY3ykQbw0oPWvxtDca4gjPVl",
     "_testnet_comment": "Obtén keys en: https://demo.binance.com (API Management)",
 
     "_comment": "--- PRODUCCIÓN (Binance.com) - Solo si testnet = false ---",

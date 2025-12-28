@@ -32,43 +32,44 @@ class SignalExecutor:
             return json.load(f)
 
     async def initialize(self):
-        """Inicializa conexión con Binance Demo"""
-        logger.info("🚀 Conectando a Binance Demo...")
+        """Inicializa conexión con Binance Demo SPOT"""
+        logger.info("🚀 Conectando a Binance Demo (SPOT)...")
 
         # Cargar API keys
         testnet_api_key = self.config['exchange']['testnet_api_key']
         testnet_api_secret = self.config['exchange']['testnet_api_secret']
 
-        # Inicializar exchange
-        self.exchange = ccxt.binanceusdm({
+        if not testnet_api_key or not testnet_api_secret:
+            raise ValueError("API keys de testnet no configuradas en config_15min.json")
+
+        # Inicializar exchange SPOT
+        self.exchange = ccxt.binance({
             'apiKey': testnet_api_key,
             'secret': testnet_api_secret,
             'enableRateLimit': True,
             'options': {
-                'defaultType': 'future',
+                'defaultType': 'spot',
                 'adjustForTimeDifference': True,
             }
         })
 
+        # Activar modo testnet (sandbox)
         self.exchange.set_sandbox_mode(True)
 
-        # Override URLs a demo
-        new_testnet_urls = {
-            'fapiPublic': 'https://demo-fapi.binance.com/fapi/v1',
-            'fapiPrivate': 'https://demo-fapi.binance.com/fapi/v1',
-            'fapiPublicV2': 'https://demo-fapi.binance.com/fapi/v2',
-            'fapiPrivateV2': 'https://demo-fapi.binance.com/fapi/v2',
-            'fapiPublicV3': 'https://demo-fapi.binance.com/fapi/v3',
-            'fapiPrivateV3': 'https://demo-fapi.binance.com/fapi/v3',
-            'public': 'https://demo-fapi.binance.com/fapi/v1',
-            'private': 'https://demo-fapi.binance.com/fapi/v1',
+        # Override URLs a testnet SPOT
+        self.exchange.urls['api'] = {
+            'public': 'https://testnet.binance.vision/api/v3',
+            'private': 'https://testnet.binance.vision/api/v3',
         }
-        self.exchange.urls['api'] = new_testnet_urls
 
         # Verificar conexión
-        balance = await self.exchange.fetch_balance()
-        usdt_balance = balance['USDT']['free']
-        logger.info(f"✓ Conectado a Binance Demo (Balance: ${usdt_balance:.2f} USDT)")
+        try:
+            balance = await self.exchange.fetch_balance()
+            usdt_balance = balance.get('USDT', {}).get('free', 0)
+            logger.info(f"✓ Conectado a Binance Demo SPOT (Balance: ${usdt_balance:.2f} USDT)")
+        except Exception as e:
+            logger.error(f"❌ Error conectando a Binance Demo: {e}")
+            raise
 
     def load_signals(self, filepath):
         """Carga señales desde CSV"""

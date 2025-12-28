@@ -6,6 +6,8 @@ Panel para generar y ejecutar señales diarias
 import streamlit as st
 import pandas as pd
 import sys
+import subprocess
+import asyncio
 from pathlib import Path
 from datetime import datetime
 
@@ -184,27 +186,65 @@ def execute_signals(signals_file, min_confidence):
         df = pd.read_csv(signals_file)
         filtered = df[df['confidence'] >= min_confidence]
 
-        st.markdown(f"### Se ejecutarán {len(filtered)} trades en Binance Demo:")
+        st.markdown(f"### Se ejecutarán {len(filtered)} trades en Binance Demo SPOT:")
 
         st.dataframe(
-            filtered[['symbol', 'direction', 'confidence', 'entry']],
+            filtered[['symbol', 'direction', 'confidence', 'entry', 'take_profit', 'stop_loss']],
             use_container_width=True
         )
 
-        confirm = st.checkbox("Confirmo que quiero ejecutar estos trades")
+        # Mostrar advertencia
+        st.info("ℹ️ Las órdenes se ejecutarán en **Binance Testnet (SPOT)** con dinero ficticio")
+
+        confirm = st.checkbox("✅ Confirmo que quiero ejecutar estos trades en Binance Demo")
 
         if confirm:
-            if st.button("✅ Ejecutar Ahora", type="primary"):
-                with st.spinner("Ejecutando trades..."):
-                    # TODO: Ejecutar execute_signals.py
-                    st.code(f"""
-# Ejecuta este comando en terminal:
-python execute_signals.py {signals_file} --min-confidence {min_confidence}
+            if st.button("🚀 Ejecutar Ahora", type="primary", key="execute_now_btn"):
+                with st.spinner("Ejecutando trades en Binance Demo..."):
+                    try:
+                        # Ejecutar script en modo non-interactive
+                        # Crear archivo temporal con confirmación
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+                            f.write('yes\n')
+                            confirm_file = f.name
 
-# Los trades se ejecutarán en Binance Demo
-                    """, language="bash")
+                        # Ejecutar script
+                        result = subprocess.run(
+                            ['python', 'execute_signals.py', str(signals_file),
+                             '--min-confidence', str(min_confidence)],
+                            capture_output=True,
+                            text=True,
+                            stdin=open(confirm_file, 'r'),
+                            timeout=60
+                        )
 
-                    st.success("✅ Revisa el terminal para ver los resultados")
+                        # Limpiar archivo temporal
+                        Path(confirm_file).unlink(missing_ok=True)
+
+                        # Mostrar resultados
+                        if result.returncode == 0:
+                            st.success("✅ Trades ejecutados exitosamente!")
+
+                            # Mostrar log
+                            with st.expander("📋 Ver log de ejecución"):
+                                st.code(result.stdout, language="bash")
+
+                            # Buscar archivo de log generado
+                            signals_dir = Path('signals')
+                            executed_files = sorted(signals_dir.glob('executed_*.csv'), reverse=True)
+                            if executed_files:
+                                st.success(f"📁 Log guardado: {executed_files[0].name}")
+                        else:
+                            st.error("❌ Error ejecutando trades")
+                            st.code(result.stderr, language="bash")
+
+                    except subprocess.TimeoutExpired:
+                        st.error("❌ Timeout: La ejecución tardó demasiado")
+                    except Exception as e:
+                        st.error(f"❌ Error ejecutando: {e}")
+                        import traceback
+                        st.code(traceback.format_exc(), language="bash")
 
     except Exception as e:
         st.error(f"❌ Error: {e}")
