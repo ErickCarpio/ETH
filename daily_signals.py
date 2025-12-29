@@ -226,30 +226,44 @@ class DailySignalsGenerator:
             logger.error(f"Error calculando S/R: {e}")
             return {'resistance': [], 'support': []}
 
-    def calculate_entry_levels(self, df, direction, current_price, confidence):
+    def calculate_entry_levels(self, df, direction, current_price, confidence,
+                              use_atr=False, atr=None, atr_mult_tp=2.5, atr_mult_sl=1.0):
         """
-        Calcula niveles de entrada, TP y SL usando PORCENTAJES FIJOS del config.
+        Calcula niveles de entrada, TP y SL.
 
-        IMPORTANTE: Esto es CONSISTENTE con el entrenamiento del modelo.
-        El modelo aprendió a predecir movimientos de >2.5% en 12h,
-        NO aprendió sobre niveles óptimos de entrada.
+        NUEVO: Si use_atr=True, usa ATR × multiplicadores (adaptativo por par)
+        Si use_atr=False, usa porcentajes fijos del config (legacy)
 
-        Por lo tanto, usamos:
-        - Entrada = precio actual
-        - TP = ±take_profit_pct (5%)
-        - SL = ∓stop_loss_pct (2%)
+        Args:
+            df: DataFrame con datos
+            direction: 'LONG' o 'SHORT'
+            current_price: Precio actual
+            confidence: Confianza del modelo
+            use_atr: Si True, usa ATR en lugar de porcentajes fijos
+            atr: Valor actual de ATR (requerido si use_atr=True)
+            atr_mult_tp: Multiplicador de ATR para TP
+            atr_mult_sl: Multiplicador de ATR para SL
         """
         try:
-            sl_pct = self.config['trading']['stop_loss_pct']
-            tp_pct = self.config['trading']['take_profit_pct']
-
             entry_options = []
 
             if direction == 'LONG':
-                # SIMPLE: Entry = precio actual, TP/SL = porcentajes fijos
                 entry = current_price
-                take_profit = current_price * (1 + tp_pct)
-                stop_loss = current_price * (1 - sl_pct)
+
+                if use_atr and atr is not None:
+                    # ADAPTATIVO: Usar ATR × multiplicadores
+                    take_profit = current_price + (atr * atr_mult_tp)
+                    stop_loss = current_price - (atr * atr_mult_sl)
+
+                    # Calcular R:R y porcentajes para logging
+                    tp_pct = (take_profit - entry) / entry
+                    sl_pct = (entry - stop_loss) / entry
+                else:
+                    # LEGACY: Usar porcentajes fijos
+                    sl_pct = self.config['trading']['stop_loss_pct']
+                    tp_pct = self.config['trading']['take_profit_pct']
+                    take_profit = current_price * (1 + tp_pct)
+                    stop_loss = current_price * (1 - sl_pct)
 
                 # Risk:Reward
                 potential_gain = take_profit - entry
@@ -269,10 +283,22 @@ class DailySignalsGenerator:
                 })
 
             else:  # SHORT
-                # SIMPLE: Entry = precio actual, TP/SL = porcentajes fijos
                 entry = current_price
-                take_profit = current_price * (1 - tp_pct)
-                stop_loss = current_price * (1 + sl_pct)
+
+                if use_atr and atr is not None:
+                    # ADAPTATIVO: Usar ATR × multiplicadores
+                    take_profit = current_price - (atr * atr_mult_tp)
+                    stop_loss = current_price + (atr * atr_mult_sl)
+
+                    # Calcular R:R y porcentajes para logging
+                    tp_pct = (entry - take_profit) / entry
+                    sl_pct = (stop_loss - entry) / entry
+                else:
+                    # LEGACY: Usar porcentajes fijos
+                    sl_pct = self.config['trading']['stop_loss_pct']
+                    tp_pct = self.config['trading']['take_profit_pct']
+                    take_profit = current_price * (1 - tp_pct)
+                    stop_loss = current_price * (1 + sl_pct)
 
                 # Risk:Reward
                 potential_gain = entry - take_profit
@@ -335,6 +361,8 @@ class DailySignalsGenerator:
         Hace predicción y calcula múltiples opciones de entrada óptimas.
         Retorna la MEJOR opción basada en Expected Value.
 
+        NUEVO: Si el modelo fue entrenado con ATR, usa ATR para TP/SL
+
         Args:
             df: DataFrame con features
             current_price: Precio actual
@@ -347,6 +375,28 @@ class DailySignalsGenerator:
             if model is None:
                 logger.error(f"❌ No se pudo cargar modelo para {symbol}")
                 return None
+
+            # Cargar metadata para obtener multiplicadores ATR
+            symbol_clean = symbol.replace('/', '')
+            metadata_file = Path(f'models/model_{symbol_clean}_metadata.json')
+
+            use_atr = False
+            atr_mult_tp = 2.5
+            atr_mult_sl = 1.0
+
+            if metadata_file.exists():
+                try:
+                    import json
+                    with open(metadata_file, 'r') as f:
+                        metadata = json.load(f)
+                        use_atr = metadata.get('use_atr', False)
+                        atr_mult_tp = metadata.get('atr_multiplier_tp', 2.5)
+                        atr_mult_sl = metadata.get('atr_multiplier_sl', 1.0)
+
+                    if use_atr:
+                        logger.info(f"✓ {symbol}: Usando ATR (TP={atr_mult_tp:.1f}x, SL={atr_mult_sl:.1f}x)")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error leyendo metadata de {symbol}, usando defaults: {e}")
 
             # Tomar última fila
             latest = df.iloc[-1:].copy()
@@ -369,8 +419,19 @@ class DailySignalsGenerator:
             confidence = pred_proba[pred_class]
             direction = 'LONG' if pred_class == 1 else 'SHORT'
 
-            # Calcular niveles de entrada óptimos (múltiples opciones)
-            entry_levels = self.calculate_entry_levels(df, direction, current_price, confidence)
+            # Calcular ATR si el modelo lo usa
+            current_atr = None
+            if use_atr and 'atr_14' in df.columns:
+                current_atr = df['atr_14'].iloc[-1]
+
+            # Calcular niveles de entrada óptimos (con ATR si aplica)
+            entry_levels = self.calculate_entry_levels(
+                df, direction, current_price, confidence,
+                use_atr=use_atr,
+                atr=current_atr,
+                atr_mult_tp=atr_mult_tp,
+                atr_mult_sl=atr_mult_sl
+            )
 
             if not entry_levels:
                 return None

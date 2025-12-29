@@ -62,8 +62,13 @@ TRAINING_CONFIG = {
 
     # Configuración de modelo
     'forward_window': 12,  # 12h forward (para 1h timeframe)
-    'trend_threshold': 0.025,  # 2.5% mínimo para considerar tendencia
+    'trend_threshold': 0.025,  # 2.5% mínimo para considerar tendencia (legacy)
     'optuna_trials': 30,  # Trials de optimización (reducido para velocidad)
+
+    # NUEVO: ATR-based labeling
+    'use_atr_labels': True,  # Usar ATR en lugar de threshold fijo
+    'atr_multiplier_tp': 2.5,  # Multiplicador para TP (2.5x ATR)
+    'atr_multiplier_sl': 1.0,  # Multiplicador para SL (1.0x ATR)
 }
 
 
@@ -238,13 +243,21 @@ def generate_features(data: dict, symbol: str, config_path: str = 'config_15min.
     return df
 
 
-def create_labels(df: pd.DataFrame, config: dict) -> pd.DataFrame:
+def create_labels(df: pd.DataFrame, config: dict,
+                 use_atr: bool = False,
+                 atr_multiplier_tp: float = 2.5,
+                 atr_multiplier_sl: float = 1.0) -> pd.DataFrame:
     """
     Crea labels binarios (LONG=1, SHORT=0) usando RegimeLabeler
+
+    NUEVO: Soporta ATR con multiplicadores personalizados
 
     Args:
         df: DataFrame con features
         config: Configuración de entrenamiento
+        use_atr: Si True, usa ATR en lugar de threshold fijo
+        atr_multiplier_tp: Multiplicador de ATR para TP
+        atr_multiplier_sl: Multiplicador de ATR para SL
 
     Returns:
         DataFrame con columna 'regime' (solo oportunidades claras)
@@ -252,10 +265,20 @@ def create_labels(df: pd.DataFrame, config: dict) -> pd.DataFrame:
     logger.info(f"\n🎯 CREANDO LABELS")
     logger.info(f"{'='*80}")
 
-    labeler = RegimeLabeler(
-        forward_window=config['forward_window'],
-        trend_threshold=config['trend_threshold']
-    )
+    if use_atr:
+        logger.info(f"📊 Usando ATR con multiplicadores: TP={atr_multiplier_tp:.2f}x, SL={atr_multiplier_sl:.2f}x")
+        labeler = RegimeLabeler(
+            forward_window=config['forward_window'],
+            use_atr=True,
+            atr_multiplier_tp=atr_multiplier_tp,
+            atr_multiplier_sl=atr_multiplier_sl
+        )
+    else:
+        logger.info(f"📊 Usando threshold fijo: {config['trend_threshold']:.1%}")
+        labeler = RegimeLabeler(
+            forward_window=config['forward_window'],
+            trend_threshold=config['trend_threshold']
+        )
 
     labeled_df = labeler.label_regime(df)
 
@@ -418,8 +441,14 @@ async def train_all_pairs():
                 })
                 continue
 
-            # 3. Crear labels
-            labeled_df = create_labels(features_df, TRAINING_CONFIG)
+            # 3. Crear labels (con ATR si está configurado)
+            labeled_df = create_labels(
+                features_df,
+                TRAINING_CONFIG,
+                use_atr=TRAINING_CONFIG.get('use_atr_labels', False),
+                atr_multiplier_tp=TRAINING_CONFIG.get('atr_multiplier_tp', 2.5),
+                atr_multiplier_sl=TRAINING_CONFIG.get('atr_multiplier_sl', 1.0)
+            )
 
             if labeled_df.empty or len(labeled_df) < 100:
                 logger.error(f"❌ Insuficientes datos etiquetados para {symbol}. Saltando...")
@@ -453,8 +482,15 @@ async def train_all_pairs():
             model_filename = f"model_{symbol}.json"
             model.save_model(model_filename)
 
-            # 6. Guardar métricas en JSON
+            # 6. Guardar métricas en JSON (incluir multiplicadores ATR)
             metrics_filename = models_dir / f"model_{symbol}_metadata.json"
+
+            # Agregar multiplicadores ATR al metadata
+            metrics['use_atr'] = TRAINING_CONFIG.get('use_atr_labels', False)
+            if metrics['use_atr']:
+                metrics['atr_multiplier_tp'] = TRAINING_CONFIG.get('atr_multiplier_tp', 2.5)
+                metrics['atr_multiplier_sl'] = TRAINING_CONFIG.get('atr_multiplier_sl', 1.0)
+
             with open(metrics_filename, 'w') as f:
                 json.dump(metrics, f, indent=2)
 

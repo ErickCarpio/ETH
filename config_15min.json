@@ -178,8 +178,13 @@
     "_comment_forward": "12 velas × 1H = 12 horas - CALIDAD sobre CANTIDAD (señales selectivas)",
     "min_reward_risk": 1.5,
     "min_move_pct": 0.015,
-    "atr_multiplier_sl": 2.0,
-    "atr_multiplier_tp": 4.0,
+
+    "_comment_atr": "ATR-based labeling (NUEVO - más adaptativo que threshold fijo)",
+    "use_atr_labels": true,
+    "atr_multiplier_tp": 2.5,
+    "atr_multiplier_sl": 1.0,
+    "_comment_atr_help": "Multiplicadores de ATR: TP=2.5x ATR, SL=1.0x ATR (R:R=2.5)",
+    "_comment_atr_future": "Fase 2: Optuna optimizará estos valores por par",
 
     "_comment_legacy_regime": "Legacy regime labeling (fixed_horizon, static, adaptive, volatility_quantiles)",
     "target_threshold_pct": 0.005,

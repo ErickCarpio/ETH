@@ -18,6 +18,9 @@ class RegimeLabeler:
     - Clase 0: SHORT (Tendencia Bajista CLARA)
     - Clase 1: LONG (Tendencia Alcista CLARA)
 
+    NUEVO: Soporta labels basados en ATR (adaptativo a volatilidad)
+    o threshold fijo (legacy)
+
     IMPORTANTE: Solo etiqueta cuando hay oportunidad REAL.
     Descarta velas laterales/inciertas del training.
 
@@ -29,27 +32,40 @@ class RegimeLabeler:
                  forward_window: int = 12,  # 12 velas de 1H = 12h forward
                  volatility_threshold_low: float = 0.015,
                  volatility_threshold_high: float = 0.05,
-                 trend_threshold: float = 0.025):
+                 trend_threshold: float = 0.025,
+                 use_atr: bool = False,  # NUEVO: usar ATR en lugar de threshold fijo
+                 atr_multiplier_tp: float = 2.5,  # NUEVO: multiplicador ATR para TP
+                 atr_multiplier_sl: float = 1.0):  # NUEVO: multiplicador ATR para SL
         """
         Args:
             forward_window: Ventanas hacia adelante para calcular target
                            - 1H: 12 velas = 12h, 24 velas = 1 día
             volatility_threshold_low: Mínimo de volatilidad para considerar (no usado en binario)
             volatility_threshold_high: Máximo de volatilidad (descarta extremos)
-            trend_threshold: Mínimo cambio % para considerar tendencia CLARA
+            trend_threshold: Mínimo cambio % para considerar tendencia CLARA (si use_atr=False)
+            use_atr: Si True, usa ATR para calcular targets en lugar de threshold fijo
+            atr_multiplier_tp: Multiplicador de ATR para take profit (ej: 2.5x ATR)
+            atr_multiplier_sl: Multiplicador de ATR para stop loss (ej: 1.0x ATR)
         """
         self.forward_window = forward_window
         self.vol_low = volatility_threshold_low
         self.vol_high = volatility_threshold_high
         self.trend_threshold = trend_threshold
+        self.use_atr = use_atr
+        self.atr_multiplier_tp = atr_multiplier_tp
+        self.atr_multiplier_sl = atr_multiplier_sl
     
     def label_regime(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Etiqueta SOLO oportunidades CLARAS de trading (LONG o SHORT)
         Descarta velas laterales/inciertas
 
+        NUEVO: Si use_atr=True, usa multiplicadores de ATR para calcular thresholds
+        Si use_atr=False, usa threshold fijo (legacy)
+
         Args:
             df: DataFrame con columnas 'close', 'high', 'low'
+                Si use_atr=True, también requiere columna 'atr_14'
 
         Returns:
             DataFrame con columna 'regime' (solo velas con oportunidad clara)
@@ -82,27 +98,65 @@ class RegimeLabeler:
         # Inicializar regime como NaN (no clasificado)
         df['regime'] = np.nan
 
-        # CLASE 1: LONG (Tendencia Alcista CLARA)
-        # Condiciones:
-        # - Return positivo significativo (> trend_threshold)
-        # - Volatilidad controlada (< vol_high)
-        bullish_mask = (
-            (df['forward_return'] > self.trend_threshold) &
-            (df['forward_volatility'] < self.vol_high) &
-            (df['forward_volatility'].notna())
-        )
-        df.loc[bullish_mask, 'regime'] = 1
+        # CALCULAR THRESHOLDS (ATR o fijo)
+        if self.use_atr:
+            # Usar ATR para threshold adaptativo
+            if 'atr_14' not in df.columns:
+                logger.warning("ATR no encontrado, calculando...")
+                # Calcular ATR simple (True Range promedio de 14 períodos)
+                df['high_low'] = df['high'] - df['low']
+                df['high_close'] = abs(df['high'] - df['close'].shift())
+                df['low_close'] = abs(df['low'] - df['close'].shift())
+                df['true_range'] = df[['high_low', 'high_close', 'low_close']].max(axis=1)
+                df['atr_14'] = df['true_range'].rolling(14).mean()
 
-        # CLASE 0: SHORT (Tendencia Bajista CLARA)
-        # Condiciones:
-        # - Return negativo significativo (< -trend_threshold)
-        # - Volatilidad controlada (< vol_high)
-        bearish_mask = (
-            (df['forward_return'] < -self.trend_threshold) &
-            (df['forward_volatility'] < self.vol_high) &
-            (df['forward_volatility'].notna())
-        )
-        df.loc[bearish_mask, 'regime'] = 0
+            # Threshold adaptativo basado en ATR
+            # TP threshold = atr_multiplier_tp × ATR / precio
+            df['atr_pct'] = df['atr_14'] / df['close']
+            df['tp_threshold'] = df['atr_pct'] * self.atr_multiplier_tp
+
+            # Para labels, usamos el TP threshold como mínimo movimiento requerido
+            # LONG: forward_return > tp_threshold
+            # SHORT: forward_return < -tp_threshold
+            bullish_mask = (
+                (df['forward_return'] > df['tp_threshold']) &
+                (df['forward_volatility'] < self.vol_high) &
+                (df['forward_volatility'].notna()) &
+                (df['tp_threshold'].notna())
+            )
+            df.loc[bullish_mask, 'regime'] = 1
+
+            bearish_mask = (
+                (df['forward_return'] < -df['tp_threshold']) &
+                (df['forward_volatility'] < self.vol_high) &
+                (df['forward_volatility'].notna()) &
+                (df['tp_threshold'].notna())
+            )
+            df.loc[bearish_mask, 'regime'] = 0
+
+        else:
+            # LEGACY: Usar threshold fijo
+            # CLASE 1: LONG (Tendencia Alcista CLARA)
+            # Condiciones:
+            # - Return positivo significativo (> trend_threshold)
+            # - Volatilidad controlada (< vol_high)
+            bullish_mask = (
+                (df['forward_return'] > self.trend_threshold) &
+                (df['forward_volatility'] < self.vol_high) &
+                (df['forward_volatility'].notna())
+            )
+            df.loc[bullish_mask, 'regime'] = 1
+
+            # CLASE 0: SHORT (Tendencia Bajista CLARA)
+            # Condiciones:
+            # - Return negativo significativo (< -trend_threshold)
+            # - Volatilidad controlada (< vol_high)
+            bearish_mask = (
+                (df['forward_return'] < -self.trend_threshold) &
+                (df['forward_volatility'] < self.vol_high) &
+                (df['forward_volatility'].notna())
+            )
+            df.loc[bearish_mask, 'regime'] = 0
 
         # CRÍTICO: Eliminar velas sin oportunidad clara (laterales, extremas, etc.)
         # Solo mantenemos velas con regime=0 o regime=1
