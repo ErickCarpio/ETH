@@ -493,15 +493,24 @@ def train_model_for_pair(features_df: pd.DataFrame, symbol: str, config: dict) -
 # FUNCIÓN PRINCIPAL
 # =====================================================================
 
-async def train_all_pairs():
+async def train_all_pairs(specific_pairs=None):
     """
-    Loop principal: entrena 20 modelos separados (uno por par)
+    Loop principal: entrena modelos separados (uno por par)
+
+    Args:
+        specific_pairs: Lista opcional de pares específicos a entrenar (ej: ['ETHUSDT', 'DOGEUSDT'])
+                       Si no se especifica, entrena todos los pares en PAIRS
     """
+    # Determinar qué pares entrenar
+    pairs_to_train = specific_pairs if specific_pairs else PAIRS
+
     logger.info("\n" + "="*80)
     logger.info("🚀 INICIANDO ENTRENAMIENTO MULTI-PAR")
     logger.info("="*80)
-    logger.info(f"Pares a entrenar: {len(PAIRS)}")
-    logger.info(f"Total de modelos: {len(PAIRS)}")
+    logger.info(f"Pares a entrenar: {len(pairs_to_train)}")
+    if specific_pairs:
+        logger.info(f"Pares específicos: {', '.join(pairs_to_train)}")
+    logger.info(f"Total de modelos: {len(pairs_to_train)}")
     logger.info(f"Configuración:")
     logger.info(f"   - Datos históricos: {TRAINING_CONFIG['days_historical']} días")
     logger.info(f"   - Timeframe principal: {TRAINING_CONFIG['timeframe_1h']}")
@@ -517,10 +526,10 @@ async def train_all_pairs():
     # Resultados del entrenamiento
     training_results = []
 
-    for i, symbol in enumerate(PAIRS, 1):
+    for i, symbol in enumerate(pairs_to_train, 1):
         try:
             logger.info(f"\n{'#'*80}")
-            logger.info(f"# PAR {i}/{len(PAIRS)}: {symbol}")
+            logger.info(f"# PAR {i}/{len(pairs_to_train)}: {symbol}")
             logger.info(f"{'#'*80}\n")
 
             # 1. Descargar datos
@@ -670,6 +679,7 @@ async def train_all_pairs():
 
 if __name__ == "__main__":
     import sys
+    import argparse
 
     # Verificar que existan los módulos necesarios
     try:
@@ -681,16 +691,38 @@ if __name__ == "__main__":
         logger.error("   Asegúrate de que todos los módulos estén en el directorio.")
         sys.exit(1)
 
+    # Argumentos de línea de comandos
+    parser = argparse.ArgumentParser(description='Entrenamiento de modelos multi-par con optimización ATR')
+    parser.add_argument('--pairs', type=str, nargs='+',
+                       help='Lista de pares específicos a entrenar (ej: --pairs ETHUSDT DOGEUSDT AVAXUSDT)')
+
+    args = parser.parse_args()
+
+    # Validar pares si se especificaron
+    specific_pairs = None
+    if args.pairs:
+        # Normalizar a uppercase
+        specific_pairs = [p.upper() for p in args.pairs]
+
+        # Validar que existan en PAIRS
+        invalid = [p for p in specific_pairs if p not in PAIRS]
+        if invalid:
+            logger.error(f"❌ Pares inválidos: {invalid}")
+            logger.error(f"   Pares válidos: {PAIRS}")
+            sys.exit(1)
+
     # Ejecutar entrenamiento
-    results = asyncio.run(train_all_pairs())
+    results = asyncio.run(train_all_pairs(specific_pairs=specific_pairs))
 
     # Exit code basado en resultados
     successful = sum(1 for r in results if r['status'] == 'SUCCESS')
+    total_pairs = len(specific_pairs) if specific_pairs else len(PAIRS)
+
     if successful == 0:
         logger.error("\n❌ Ningún modelo se entrenó exitosamente")
         sys.exit(1)
-    elif successful < len(PAIRS):
-        logger.warning(f"\n⚠️  Solo {successful}/{len(PAIRS)} modelos se entrenaron exitosamente")
+    elif successful < total_pairs:
+        logger.warning(f"\n⚠️  Solo {successful}/{total_pairs} modelos se entrenaron exitosamente")
         sys.exit(0)
     else:
         logger.info(f"\n✅ Todos los modelos ({successful}) se entrenaron exitosamente!")
