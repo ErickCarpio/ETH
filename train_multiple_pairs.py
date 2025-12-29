@@ -289,99 +289,204 @@ def train_model_for_pair(features_df: pd.DataFrame, symbol: str, config: dict) -
     """
     Entrena modelo XGBoost para un par específico
 
+    NUEVO: Optuna optimiza MULTIPLICADORES ATR + hiperparámetros XGBoost juntos
+
     Args:
-        features_df: DataFrame con features y labels
+        features_df: DataFrame con features (SIN labels aún)
         symbol: Símbolo del par
         config: Configuración de entrenamiento
 
     Returns:
-        Modelo entrenado
+        Tupla (modelo entrenado, métricas con multiplicadores óptimos)
     """
     logger.info(f"\n🤖 ENTRENANDO MODELO PARA {symbol}")
     logger.info(f"{'='*80}")
 
-    # Separar features y target
-    feature_cols = [col for col in features_df.columns if col not in ['regime', 'forward_return', 'forward_volatility', 'forward_hl_range']]
+    import optuna
+    from sklearn.model_selection import TimeSeriesSplit
+    from sklearn.metrics import f1_score, accuracy_score, precision_recall_fscore_support
+    import xgboost as xgb
 
-    X = features_df[feature_cols]
-    y = features_df['regime']
+    # Configuración de Optuna
+    use_atr = config.get('use_atr_labels', False)
+    n_trials = config.get('optuna_trials', 30)
 
-    # Verificar que tengamos ambas clases
-    class_counts = y.value_counts()
-    logger.info(f"Distribución de clases:")
-    logger.info(f"   LONG (1): {class_counts.get(1, 0)} ({class_counts.get(1, 0) / len(y) * 100:.1f}%)")
-    logger.info(f"   SHORT (0): {class_counts.get(0, 0)} ({class_counts.get(0, 0) / len(y) * 100:.1f}%)")
+    # Variables para guardar el mejor modelo y sus multiplicadores
+    best_model = None
+    best_multipliers = {'atr_multiplier_tp': 2.5, 'atr_multiplier_sl': 1.0}
+    best_metrics = {}
 
-    if len(class_counts) < 2:
-        logger.error(f"❌ Solo hay una clase en los datos. No se puede entrenar.")
-        return None
+    def objective(trial):
+        """Función objetivo de Optuna que optimiza ATR + XGBoost juntos"""
+        nonlocal best_model, best_multipliers, best_metrics
 
-    # Pesos temporales (calcular ANTES del split, usando todo el DataFrame)
-    temporal_weighter = TemporalWeighting(
-        decay_rate=0.001,  # Decay suave
-        min_weight=0.1,    # Peso mínimo 10%
-        max_weight=1.0,    # Peso máximo 100%
-        recent_days=7      # Últimos 7 días peso completo
+        # 1. OPTIMIZAR MULTIPLICADORES ATR (si está habilitado)
+        if use_atr:
+            atr_mult_tp = trial.suggest_float('atr_multiplier_tp', 1.5, 4.0)
+            atr_mult_sl = trial.suggest_float('atr_multiplier_sl', 0.5, 2.0)
+        else:
+            atr_mult_tp = config.get('atr_multiplier_tp', 2.5)
+            atr_mult_sl = config.get('atr_multiplier_sl', 1.0)
+
+        # 2. CREAR LABELS con los multiplicadores de este trial
+        labeled_df = create_labels(
+            features_df.copy(),
+            config,
+            use_atr=use_atr,
+            atr_multiplier_tp=atr_mult_tp,
+            atr_multiplier_sl=atr_mult_sl
+        )
+
+        # Si no hay suficientes datos, penalizar
+        if labeled_df.empty or len(labeled_df) < 100:
+            return 0.0
+
+        # 3. SEPARAR FEATURES Y TARGET
+        feature_cols = [col for col in labeled_df.columns
+                       if col not in ['regime', 'forward_return', 'forward_volatility',
+                                     'forward_hl_range', 'atr_pct', 'tp_threshold']]
+
+        X = labeled_df[feature_cols]
+        y = labeled_df['regime']
+
+        # Verificar que tengamos ambas clases
+        if len(y.value_counts()) < 2:
+            return 0.0
+
+        # 4. TEMPORAL WEIGHTING
+        temporal_weighter = TemporalWeighting(
+            decay_rate=0.001,
+            min_weight=0.1,
+            max_weight=1.0,
+            recent_days=7
+        )
+        all_weights = temporal_weighter.calculate_weights(labeled_df)
+
+        # 5. TIME SERIES SPLIT
+        split_idx = int(len(X) * 0.8)
+        X_train = X.iloc[:split_idx]
+        y_train = y.iloc[:split_idx]
+        sample_weights = all_weights[:split_idx]
+
+        # 6. OPTIMIZAR HIPERPARÁMETROS XGBOOST
+        params = {
+            'objective': 'binary:logistic',
+            'eval_metric': 'logloss',
+            'tree_method': 'hist',
+            'device': 'cpu',
+            'max_depth': trial.suggest_int('max_depth', 3, 10),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
+            'n_estimators': trial.suggest_int('n_estimators', 100, 500),
+            'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
+            'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+            'gamma': trial.suggest_float('gamma', 0, 5),
+            'reg_alpha': trial.suggest_float('reg_alpha', 1e-5, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 1e-5, 10.0, log=True),
+            'random_state': 42
+        }
+
+        # 7. CROSS-VALIDATION con TimeSeriesSplit
+        tscv = TimeSeriesSplit(n_splits=3)
+        scores = []
+
+        for train_idx, val_idx in tscv.split(X_train):
+            X_fold_train = X_train.iloc[train_idx]
+            y_fold_train = y_train.iloc[train_idx]
+            w_fold_train = sample_weights[train_idx]
+
+            X_fold_val = X_train.iloc[val_idx]
+            y_fold_val = y_train.iloc[val_idx]
+
+            model = xgb.XGBClassifier(**params)
+            model.fit(X_fold_train, y_fold_train, sample_weight=w_fold_train, verbose=False)
+
+            y_pred = model.predict(X_fold_val)
+            score = f1_score(y_fold_val, y_pred, average='weighted')
+            scores.append(score)
+
+        mean_score = np.mean(scores)
+
+        # 8. SI ES EL MEJOR, entrenar modelo completo y guardarlo
+        if trial.number == 0 or mean_score > trial.study.best_value:
+            # Entrenar en TODO el train set
+            final_model = xgb.XGBClassifier(**params)
+            final_model.fit(X_train, y_train, sample_weight=sample_weights, verbose=False)
+
+            # Evaluar en test set
+            X_test = X.iloc[split_idx:]
+            y_test = y.iloc[split_idx:]
+            y_pred_test = final_model.predict(X_test)
+
+            # Métricas finales
+            accuracy = accuracy_score(y_test, y_pred_test)
+            precision, recall, f1, support = precision_recall_fscore_support(
+                y_test, y_pred_test, average=None, labels=[0, 1]
+            )
+
+            # Guardar modelo y métricas
+            best_model = final_model
+            best_multipliers = {
+                'atr_multiplier_tp': atr_mult_tp,
+                'atr_multiplier_sl': atr_mult_sl
+            }
+            best_metrics = {
+                'accuracy': float(accuracy),
+                'precision_short': float(precision[0]) if len(precision) > 0 else 0.0,
+                'precision_long': float(precision[1]) if len(precision) > 1 else 0.0,
+                'recall_short': float(recall[0]) if len(recall) > 0 else 0.0,
+                'recall_long': float(recall[1]) if len(recall) > 1 else 0.0,
+                'f1_short': float(f1[0]) if len(f1) > 0 else 0.0,
+                'f1_long': float(f1[1]) if len(f1) > 1 else 0.0,
+                'support_short': int(support[0]) if len(support) > 0 else 0,
+                'support_long': int(support[1]) if len(support) > 1 else 0,
+                'test_samples': int(len(y_test)),
+                'train_samples': int(len(y_train)),
+                'f1_weighted': float(mean_score)
+            }
+
+        return mean_score
+
+    # EJECUTAR OPTIMIZACIÓN
+    logger.info(f"🔍 Optimizando multiplicadores ATR + hiperparámetros XGBoost...")
+    logger.info(f"   Trials: {n_trials}")
+
+    study = optuna.create_study(
+        direction='maximize',
+        sampler=optuna.samplers.TPESampler(seed=42),
+        pruner=optuna.pruners.MedianPruner(n_warmup_steps=5)
     )
 
-    # Calcular pesos con todo el DataFrame (que tiene índice temporal)
-    all_weights = temporal_weighter.calculate_weights(features_df)
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
-    # Split temporal (80% train, 20% test)
-    split_idx = int(len(X) * 0.8)
-    X_train = X.iloc[:split_idx]
-    X_test = X.iloc[split_idx:]
-    y_train = y.iloc[:split_idx]
-    y_test = y.iloc[split_idx:]
+    # RESULTADOS
+    logger.info(f"\n📊 RESULTADOS DE OPTIMIZACIÓN:")
+    logger.info(f"   Best F1-weighted: {study.best_value:.4f}")
 
-    # Slice de pesos para train set
-    sample_weights = all_weights[:split_idx]
+    if use_atr:
+        logger.info(f"   🎯 Multiplicadores óptimos:")
+        logger.info(f"      TP: {best_multipliers['atr_multiplier_tp']:.2f}x ATR")
+        logger.info(f"      SL: {best_multipliers['atr_multiplier_sl']:.2f}x ATR")
 
-    # Entrenar modelo
-    model = XGBoostRegimeModel(
-        n_classes=2,  # Binario: LONG vs SHORT
-        optuna_trials=config['optuna_trials']
-    )
+    logger.info(f"\n📊 MÉTRICAS EN TEST SET:")
+    logger.info(f"   Accuracy: {best_metrics.get('accuracy', 0):.1%}")
+    logger.info(f"   Precision LONG: {best_metrics.get('precision_long', 0):.1%}")
+    logger.info(f"   Recall LONG: {best_metrics.get('recall_long', 0):.1%}")
 
-    model.train(
-        X_train, y_train,
-        sample_weights=sample_weights,
-        X_val=X_test,
-        y_val=y_test,
-        optimize=True
-    )
+    # Agregar multiplicadores a las métricas
+    best_metrics.update(best_multipliers)
 
-    # Evaluar en test set
-    logger.info(f"\n📊 EVALUACIÓN EN TEST SET:")
-    y_pred = model.predict(X_test)
-    from sklearn.metrics import classification_report, accuracy_score, precision_recall_fscore_support
+    # Crear objeto compatible con el flujo existente
+    class ModelWrapper:
+        def __init__(self, xgb_model):
+            self.model = xgb_model
 
-    # Generar report completo
-    report_text = classification_report(y_test, y_pred, target_names=['SHORT', 'LONG'])
-    print(report_text)
+        def save_model(self, filename):
+            self.model.save_model(filename)
 
-    # Calcular métricas individuales
-    accuracy = accuracy_score(y_test, y_pred)
-    precision, recall, f1, support = precision_recall_fscore_support(
-        y_test, y_pred, average=None, labels=[0, 1]
-    )
+    wrapped_model = ModelWrapper(best_model)
 
-    # Crear diccionario de métricas
-    metrics = {
-        'accuracy': float(accuracy),
-        'precision_short': float(precision[0]),
-        'precision_long': float(precision[1]),
-        'recall_short': float(recall[0]),
-        'recall_long': float(recall[1]),
-        'f1_short': float(f1[0]),
-        'f1_long': float(f1[1]),
-        'support_short': int(support[0]),
-        'support_long': int(support[1]),
-        'test_samples': int(len(y_test)),
-        'train_samples': int(len(y_train))
-    }
-
-    return model, metrics
+    return wrapped_model, best_metrics
 
 
 # =====================================================================
