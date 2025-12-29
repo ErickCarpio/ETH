@@ -451,17 +451,41 @@ def train_model_for_pair(features_df: pd.DataFrame, symbol: str, config: dict) -
     logger.info(f"🔍 Optimizando multiplicadores ATR + hiperparámetros XGBoost...")
     logger.info(f"   Trials: {n_trials}")
 
+    # Crear directorio para estudios de Optuna
+    from pathlib import Path
+    optuna_dir = Path('./optuna_studies')
+    optuna_dir.mkdir(exist_ok=True)
+
+    # Storage persistente (SQLite) - guarda trials entre ejecuciones
+    storage_name = f"sqlite:///{optuna_dir}/optuna_{symbol}.db"
+    study_name = f"{symbol}_atr_optimization"
+
+    # Crear o cargar estudio existente
     study = optuna.create_study(
+        study_name=study_name,
+        storage=storage_name,
         direction='maximize',
         sampler=optuna.samplers.TPESampler(seed=42),
-        pruner=optuna.pruners.MedianPruner(n_warmup_steps=5)
+        pruner=optuna.pruners.MedianPruner(n_warmup_steps=5),
+        load_if_exists=True  # ¡CLAVE! Continúa desde trials anteriores
     )
+
+    # Verificar si hay trials anteriores
+    n_previous_trials = len(study.trials)
+    if n_previous_trials > 0:
+        logger.info(f"📚 Encontrados {n_previous_trials} trials anteriores")
+        logger.info(f"   Best anterior: {study.best_value:.4f}")
+        logger.info(f"   Continuando desde trial {n_previous_trials + 1}...")
 
     study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
     # RESULTADOS
+    total_trials = len(study.trials)
     logger.info(f"\n📊 RESULTADOS DE OPTIMIZACIÓN:")
+    logger.info(f"   Trials totales acumulados: {total_trials}")
+    logger.info(f"   Trials en esta ejecución: {n_trials}")
     logger.info(f"   Best F1-weighted: {study.best_value:.4f}")
+    logger.info(f"   Best trial: #{study.best_trial.number}")
 
     if use_atr:
         logger.info(f"   🎯 Multiplicadores óptimos:")
@@ -475,6 +499,11 @@ def train_model_for_pair(features_df: pd.DataFrame, symbol: str, config: dict) -
 
     # Agregar multiplicadores a las métricas
     best_metrics.update(best_multipliers)
+
+    # Agregar información de Optuna
+    best_metrics['optuna_trials_total'] = total_trials
+    best_metrics['optuna_trials_this_run'] = n_trials
+    best_metrics['optuna_best_trial'] = study.best_trial.number
 
     # Crear objeto compatible con el flujo existente
     class ModelWrapper:
