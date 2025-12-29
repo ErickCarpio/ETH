@@ -93,11 +93,21 @@ class DailySignalsGenerator:
             logger.error(f"❌ Error cargando modelo para {symbol}: {e}")
             return None
 
-    async def get_top_pairs(self, limit=20):
-        """Obtiene los pares con modelos entrenados"""
-        logger.info(f"📊 Usando pares con modelos entrenados...")
+    async def get_top_pairs(self, limit=20, specific_pairs=None):
+        """
+        Obtiene los pares con modelos entrenados
+
+        Args:
+            limit: Número máximo de pares (si specific_pairs no está definido)
+            specific_pairs: Lista específica de pares a usar (ej: ['ETH/USDT', 'DOGE/USDT'])
+        """
+        # Si se especificaron pares específicos, usarlos
+        if specific_pairs:
+            logger.info(f"📊 Usando {len(specific_pairs)} pares específicos: {', '.join(specific_pairs)}")
+            return specific_pairs
 
         # Lista de pares que fueron entrenados
+        logger.info(f"📊 Usando pares con modelos entrenados...")
         trained_pairs = [
             'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'ADA/USDT',
             'DOGE/USDT', 'DOT/USDT', 'LINK/USDT', 'UNI/USDT', 'ATOM/USDT',
@@ -608,13 +618,19 @@ class DailySignalsGenerator:
             print(f"  - Todas las opciones: {filepath_all}")
         print("="*100 + "\n")
 
-    async def run(self, num_pairs=20):
-        """Ejecuta el generador de señales"""
+    async def run(self, num_pairs=20, specific_pairs=None):
+        """
+        Ejecuta el generador de señales
+
+        Args:
+            num_pairs: Número de pares a analizar (si specific_pairs no está definido)
+            specific_pairs: Lista específica de pares (ej: ['ETH/USDT', 'DOGE/USDT'])
+        """
         try:
             await self.initialize()
 
-            # Obtener top pares
-            pairs = await self.get_top_pairs(limit=num_pairs)
+            # Obtener pares
+            pairs = await self.get_top_pairs(limit=num_pairs, specific_pairs=specific_pairs)
 
             # Generar señales
             signals = await self.generate_signals(pairs)
@@ -639,11 +655,13 @@ async def main():
     parser = argparse.ArgumentParser(description='Generador de señales diarias de trading')
     parser.add_argument('--pairs', type=int, default=20, help='Número de pares a analizar (default: 20)')
     parser.add_argument('--config', type=str, default='config_15min.json', help='Archivo de configuración')
+    parser.add_argument('--specific-pairs', type=str, nargs='+',
+                       help='Lista específica de pares (ej: --specific-pairs ETH/USDT DOGE/USDT AVAX/USDT)')
 
     args = parser.parse_args()
 
     generator = DailySignalsGenerator(config_path=args.config)
-    await generator.run(num_pairs=args.pairs)
+    await generator.run(num_pairs=args.pairs, specific_pairs=args.specific_pairs)
 
 
 if __name__ == "__main__":
