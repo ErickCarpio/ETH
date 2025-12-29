@@ -592,12 +592,34 @@ async def train_all_pairs(specific_pairs=None):
                 model = result
                 metrics = {}
 
-            # 5. Guardar modelo con nombre del par
+            # 5. BACKUP del modelo anterior (si existe)
             model_filename = f"model_{symbol}.json"
-            model.save_model(model_filename)
+            model_path = models_dir / model_filename
+            metadata_filename = models_dir / f"model_{symbol}_metadata.json"
 
-            # 6. Guardar métricas en JSON (incluir multiplicadores ATR)
-            metrics_filename = models_dir / f"model_{symbol}_metadata.json"
+            if model_path.exists():
+                # Crear directorio de backups
+                backup_dir = models_dir / 'backups'
+                backup_dir.mkdir(exist_ok=True)
+
+                # Backup con timestamp
+                from datetime import datetime
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                backup_model = backup_dir / f"model_{symbol}_{timestamp}.json"
+                backup_metadata = backup_dir / f"model_{symbol}_metadata_{timestamp}.json"
+
+                import shutil
+                shutil.copy2(model_path, backup_model)
+                if metadata_filename.exists():
+                    shutil.copy2(metadata_filename, backup_metadata)
+
+                logger.info(f"📦 Backup guardado: {backup_model}")
+
+            # 6. Guardar nuevo modelo
+            model.save_model(str(model_path))
+
+            # 7. Guardar métricas en JSON (incluir multiplicadores ATR)
+            metrics_filename = metadata_filename
 
             # Agregar multiplicadores ATR al metadata
             metrics['use_atr'] = TRAINING_CONFIG.get('use_atr_labels', False)
